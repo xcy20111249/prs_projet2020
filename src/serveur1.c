@@ -12,7 +12,7 @@
 
 #define RCVSIZE 20
 #define ACKPORT 12
-#define MSGSIZE 4096
+#define MSGSIZE 1024
 #define SEQSIZE 6
 #define ACKSIZE 20
 
@@ -149,7 +149,7 @@ int main(int argc,char* argv[]) {
         int seq=0;
         char ackmsg[10];
 
-        //while (!feof(fp)) {
+        while (!feof(fp)) {
           fd_set readfds;
           FD_ZERO(&readfds);
           char sequence[6];
@@ -166,18 +166,16 @@ int main(int argc,char* argv[]) {
             seqint=(seqint-r)/10;
           }
 
-          printf("sequence is %s\n",sequence );
+          printf("sequence is %.6s\n",sequence );
           memset(msgbuffer,0,SEQSIZE+MSGSIZE);
-          printf("ctr and seq is %s\n",msgbuffer);
           sprintf(ackmsg,"%s%.6s","ACK",sequence);
           ackmsg[sizeof(ackmsg)-1]='\0';
-          printf("%s\n", ackmsg);
+          printf("should receive %s\n", ackmsg);
 
           len=fread(tembuffer,1,MSGSIZE,fp);
           printf("len of tembuffer %d\n", len);
           fflush(stdout);
-          printf("sequence num %s\n", sequence);
-          sprintf(msgbuffer,"%.8s%s",sequence,"tembuffer");
+          sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
           fflush(stdout);
           printf("combined\n");
 
@@ -186,17 +184,16 @@ int main(int argc,char* argv[]) {
             timeout.tv_sec=3;
             timeout.tv_usec=0;
 
-            printf("setted\n");
+            //printf("setted\n");
             sendto(sockets[1],msgbuffer,SEQSIZE+MSGSIZE,0,(struct sockaddr*)&client_addr,c_len);
-            printf("%s\n", msgbuffer);
+            //printf("%s\n", msgbuffer);
             int resul=select(sockets[1]+1,&readfds,NULL,NULL,&timeout);
 
-            //send msg and wait for ack
+            //sent msg and wait for ack
             if (FD_ISSET(sockets[1],&readfds)) {
-              sleep(1);
+              sleep(0.5);
               memset(ackbuffer,0,ACKSIZE);
               recvfrom(sockets[1],ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
-              printf("%s\n", ackbuffer);
               if(strcmp(ackbuffer,ackmsg)==0){
                 printf("msg %s rcved\n", ackmsg);
                 break;
@@ -211,7 +208,7 @@ int main(int argc,char* argv[]) {
           seq+=MSGSIZE;
 
 
-        //}
+        }
         printf("transmission done\n");
         fclose(fp);
       }
