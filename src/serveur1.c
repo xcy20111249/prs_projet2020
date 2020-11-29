@@ -13,7 +13,7 @@
 #define RCVSIZE 20
 #define ACKPORT 12
 #define MSGSIZE 4096
-#define SEQSIZE 12
+#define SEQSIZE 6
 #define ACKSIZE 20
 
 int main(int argc,char* argv[]) {
@@ -80,7 +80,7 @@ int main(int argc,char* argv[]) {
     ackport[ACKPORT-1]='\0';
     sprintf(ackport,"%s%d","SYN-ACK",port_servertcp);
     printf("%s\n", ackport);
-    int goon=1;//control of msg transmission
+    int goon=1;//control for msg transmission begin
     int con=1;//control of handshake done
     while (con) {
       int cont=0;
@@ -88,15 +88,15 @@ int main(int argc,char* argv[]) {
       recvfrom(sockets[0],serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
       printf("****************\n");
       if (strcmp(serverbuffer,"SYN")==0) {
-        printf("client udp say: hello\n");
+        printf("client ask for tcp connection\n");
         char* ip_client_udp=inet_ntoa(client_addr.sin_addr);
         int port_client_udp=ntohs(client_addr.sin_port);
-        printf("IP addresse of client udp is %s\n", ip_client_udp);
-        printf("Port of client udp is %d\n", port_client_udp);
+        printf("Client IP is %s\n", ip_client_udp);
+        printf("Client port is %d\n", port_client_udp);
 
         while (1) {
           sendto(sockets[0],ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
-          printf("port info sent\n");
+          printf("tcp port info sent\n");
           memset(serverbuffer,0,RCVSIZE);
           recvfrom(sockets[0],serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
           if (strcmp(serverbuffer,"ACK")==0) {
@@ -104,13 +104,14 @@ int main(int argc,char* argv[]) {
             con=0;
             break;
           }
+          cont++;
+          if (cont>=5) {//5 cercles no response
+            goon=0;
+            printf("failed\n");
+            break;
+          }
+          sleep(0.5);
         }
-      }
-      cont++;
-      if (cont>=5) {//5 cercles no response
-        goon=0;
-        printf("failed\n");
-        break;
       }
     }
     //handshake done, beginning the transmission
@@ -133,7 +134,6 @@ int main(int argc,char* argv[]) {
         if (strcmp(serverbuffer,"close")==0) {
           cont=0;
         }
-        sendto(sockets[1],serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,c_len);
 
         //client ask for a non exist file
         if ((fp=fopen("index.jpeg","rb"))==NULL) {
