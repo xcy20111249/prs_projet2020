@@ -138,7 +138,7 @@ int main(int argc,char* argv[]) {
         fname=serverbuffer;
 
         //client ask for a non exist file
-        if ((fp=fopen("index.jpeg","rb"))==NULL) {
+        if ((fp=fopen(fname,"rb"))==NULL) {
           printf("file not found\n");
           exit(1);
         }
@@ -147,13 +147,13 @@ int main(int argc,char* argv[]) {
 
         fflush(stdout);
         int seq=0;
-        char ackmsg[12];
+        char ackmsg[10];
 
         //while (!feof(fp)) {
           fd_set readfds;
           FD_ZERO(&readfds);
-          char sequence[8];
-          memset(sequence,0,8);
+          char sequence[6];
+          memset(sequence,0,6);
           int seqint=seq;
           int r;
           char exchange[2];
@@ -169,7 +169,7 @@ int main(int argc,char* argv[]) {
           printf("sequence is %s\n",sequence );
           memset(msgbuffer,0,SEQSIZE+MSGSIZE);
           printf("ctr and seq is %s\n",msgbuffer);
-          sprintf(ackmsg,"%s%.8s","ACK",sequence);
+          sprintf(ackmsg,"%s%.6s","ACK",sequence);
           ackmsg[sizeof(ackmsg)-1]='\0';
           printf("%s\n", ackmsg);
 
