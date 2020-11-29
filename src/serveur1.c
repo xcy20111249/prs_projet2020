@@ -117,11 +117,11 @@ int main(int argc,char* argv[]) {
     //handshake done, beginning the transmission
     if (goon) {//begin communication
       FILE *fp;
-      char msgbuffer[SEQSIZE+MSGSIZE];//recieved msg
       char ackbuffer[ACKSIZE];//ack msg
       char tembuffer[MSGSIZE];//data of the pic
       char fname[RCVSIZE];
       int len;
+      int varmsgsize=MSGSIZE/8;
       fd_set readfds;
       FD_ZERO(&readfds);
       struct timeval timeout;
@@ -167,12 +167,14 @@ int main(int argc,char* argv[]) {
           }
 
           printf("sequence is %.6s\n",sequence );
-          memset(msgbuffer,0,SEQSIZE+MSGSIZE);
+          char msgbuffer[SEQSIZE+varmsgsize];//whole msg for transmission
+          memset(msgbuffer,0,SEQSIZE+varmsgsize);
           sprintf(ackmsg,"%s%.6s","ACK",sequence);
           ackmsg[sizeof(ackmsg)-1]='\0';
           printf("should receive %s\n", ackmsg);
 
-          len=fread(tembuffer,1,MSGSIZE,fp);
+          memset(tembuffer,0,MSGSIZE);
+          len=fread(tembuffer,1,varmsgsize,fp);
           printf("len of tembuffer %d\n", len);
           fflush(stdout);
           sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
@@ -185,7 +187,7 @@ int main(int argc,char* argv[]) {
             timeout.tv_usec=0;
 
             //printf("setted\n");
-            sendto(sockets[1],msgbuffer,SEQSIZE+MSGSIZE,0,(struct sockaddr*)&client_addr,c_len);
+            sendto(sockets[1],msgbuffer,SEQSIZE+varmsgsize,0,(struct sockaddr*)&client_addr,c_len);
             //printf("%s\n", msgbuffer);
             int resul=select(sockets[1]+1,&readfds,NULL,NULL,&timeout);
 
@@ -205,9 +207,10 @@ int main(int argc,char* argv[]) {
               continue;
             }
           }
-          seq+=MSGSIZE;
-
-
+          seq+=varmsgsize;
+          if(varmsgsize<MSGSIZE){
+            varmsgsize*=2;
+          }
         }
         printf("transmission done\n");
         fclose(fp);
