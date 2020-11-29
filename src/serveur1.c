@@ -135,7 +135,7 @@ int main(int argc,char* argv[]) {
         if (strcmp(serverbuffer,"close")==0) {
           cont=0;
         }
-        fname=serverbuffer;
+        sprintf(fname,"%s",serverbuffer);
 
         //client ask for a non exist file
         if ((fp=fopen(fname,"rb"))==NULL) {
