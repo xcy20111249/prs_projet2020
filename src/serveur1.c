@@ -120,6 +120,7 @@ int main(int argc,char* argv[]) {
       char msgbuffer[SEQSIZE+MSGSIZE];//recieved msg
       char ackbuffer[ACKSIZE];//ack msg
       char tembuffer[MSGSIZE];//data of the pic
+      char fname[RCVSIZE];
       int len;
       fd_set readfds;
       FD_ZERO(&readfds);
@@ -134,6 +135,7 @@ int main(int argc,char* argv[]) {
         if (strcmp(serverbuffer,"close")==0) {
           cont=0;
         }
+        fname=serverbuffer;
 
         //client ask for a non exist file
         if ((fp=fopen("index.jpeg","rb"))==NULL) {
@@ -145,11 +147,8 @@ int main(int argc,char* argv[]) {
 
         fflush(stdout);
         int seq=0;
-        char ctrmsg[4];
         char ackmsg[12];
-        for (int i = 0; i < sizeof(ctrmsg); i++) {
-          ctrmsg[i]='1';
-        }
+
         //while (!feof(fp)) {
           fd_set readfds;
           FD_ZERO(&readfds);
@@ -177,9 +176,8 @@ int main(int argc,char* argv[]) {
           len=fread(tembuffer,1,MSGSIZE,fp);
           printf("len of tembuffer %d\n", len);
           fflush(stdout);
-          printf("ctrmsg %s\n", ctrmsg);
           printf("sequence num %s\n", sequence);
-          sprintf(msgbuffer,"%.4s%.8s%s",ctrmsg,sequence,"tembuffer");
+          sprintf(msgbuffer,"%.8s%s",sequence,"tembuffer");
           fflush(stdout);
           printf("combined\n");
 
