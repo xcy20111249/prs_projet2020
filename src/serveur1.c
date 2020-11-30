@@ -146,7 +146,7 @@ int main(int argc,char* argv[]) {
         printf("transmission begin\n");
 
         fflush(stdout);
-        int seq=0;
+        int seq=1;
         char ackmsg[10];
 
         while (!feof(fp)) {
@@ -183,11 +183,11 @@ int main(int argc,char* argv[]) {
 
           while (1) {
             FD_SET(sockets[1],&readfds);
-            timeout.tv_sec=3;
-            timeout.tv_usec=0;
+            timeout.tv_sec=1;
+            timeout.tv_usec=500000;
 
             //printf("setted\n");
-            sendto(sockets[1],msgbuffer,SEQSIZE+varmsgsize,0,(struct sockaddr*)&client_addr,c_len);
+            sendto(sockets[1],msgbuffer,SEQSIZE+len,0,(struct sockaddr*)&client_addr,c_len);
             //printf("%s\n", msgbuffer);
             int resul=select(sockets[1]+1,&readfds,NULL,NULL,&timeout);
 
@@ -207,11 +207,12 @@ int main(int argc,char* argv[]) {
               continue;
             }
           }
-          seq+=varmsgsize;
+          seq++;
           if(varmsgsize<MSGSIZE){
             varmsgsize*=2;
           }
         }
+        sendto(sockets[1],"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
         printf("transmission done\n");
         fclose(fp);
       }
