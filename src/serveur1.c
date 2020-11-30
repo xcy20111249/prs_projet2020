@@ -9,12 +9,17 @@
 #include <sys/select.h>
 #include <sys/time.h>
 #include <errno.h>
+#include <math.h>
 
 #define RCVSIZE 20
 #define ACKPORT 12
 #define MSGSIZE 1024
 #define SEQSIZE 6
 #define ACKSIZE 20
+#define ALPHA 0.125
+#define BETA 0.25
+#define MU 1
+#define DEE 4
 
 int main(int argc,char* argv[]) {
   if (argc<2) {
@@ -124,7 +129,13 @@ int main(int argc,char* argv[]) {
       int varmsgsize=MSGSIZE/8;
       fd_set readfds;
       FD_ZERO(&readfds);
-      struct timeval timeout;
+      struct timeval timeout,start,end;
+      struct timeval RTT, SRTT, DevRTT, RTO;
+      RTO.tv_sec=1;
+      RTO.tv_usec=500000;
+      SRTT.tv_usec=10000;
+      SRTT.tv_sec=0;
+      long total_us_calcul;
 
       printf("go on\n");
       int cont=1;
@@ -179,24 +190,31 @@ int main(int argc,char* argv[]) {
           fflush(stdout);
           sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
           fflush(stdout);
-          printf("combined\n");
+          printf("package ready\n");
 
           while (1) {
             FD_SET(sockets[1],&readfds);
-            timeout.tv_sec=1;
-            timeout.tv_usec=500000;
+            timeout.tv_sec=RTO.tv_sec;
+            timeout.tv_usec=RTO.tv_usec;
 
             //printf("setted\n");
             sendto(sockets[1],msgbuffer,SEQSIZE+len,0,(struct sockaddr*)&client_addr,c_len);
+            gettimeofday(&start,NULL);
             //printf("%s\n", msgbuffer);
             int resul=select(sockets[1]+1,&readfds,NULL,NULL,&timeout);
 
             //sent msg and wait for ack
             if (FD_ISSET(sockets[1],&readfds)) {
-              sleep(0.5);
+              //sleep(0.5);
               memset(ackbuffer,0,ACKSIZE);
               recvfrom(sockets[1],ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+              gettimeofday(&end,NULL);
+              total_us_calcul=1e6*(end.tv_sec-start.tv_sec)+(end.tv_usec-start.tv_usec);
+              RTT.tv_sec=total_us_calcul/1e6;
+              RTT.tv_usec=total_us_calcul-RTT.tv_sec;
+              printf("RTT is %lds %ldus\n", RTT.tv_sec,RTT.tv_usec);
               if(strcmp(ackbuffer,ackmsg)==0){
+
                 printf("msg %s rcved\n", ackmsg);
                 break;
               }
@@ -208,6 +226,14 @@ int main(int argc,char* argv[]) {
             }
           }
           seq++;
+          SRTT.tv_sec+=ALPHA*(RTT.tv_sec-SRTT.tv_sec);
+          SRTT.tv_usec+=ALPHA*(RTT.tv_usec-SRTT.tv_usec);
+          printf("SRTT is %lds %ldus\n", SRTT.tv_sec,SRTT.tv_usec);
+          DevRTT.tv_sec = (1-BETA)*DevRTT.tv_sec+BETA*abs(RTT.tv_sec-SRTT.tv_sec);
+          DevRTT.tv_usec = (1-BETA)*DevRTT.tv_usec+BETA*abs(RTT.tv_usec-SRTT.tv_usec);
+          RTO.tv_sec= MU* SRTT.tv_sec+DEE*DevRTT.tv_sec;
+          RTO.tv_usec= MU* SRTT.tv_usec+DEE*DevRTT.tv_usec;
+          printf("RTO is %lds %ldus\n", RTO.tv_sec,RTO.tv_usec);
           if(varmsgsize<MSGSIZE){
             varmsgsize*=2;
           }
