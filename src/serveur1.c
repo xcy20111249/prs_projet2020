@@ -21,6 +21,28 @@
 #define MU 1
 #define DEE 4
 
+struct timeval RTT, SRTT, DevRTT, RTO;
+
+void calcul_RTO(/* arguments */) {
+  int srtt_us, rtt_us, devrtt_us, rto_us;
+  srtt_us=1e6*SRTT.tv_sec+SRTT.tv_usec;
+  rtt_us=1e6*RTT.tv_sec+RTT.tv_usec;
+  devrtt_us=1e6*DevRTT.tv_sec+DevRTT.tv_usec;
+  rto_us=1e6*RTO.tv_sec+RTO.tv_usec;
+
+  srtt_us+=ALPHA*(rtt_us-srtt_us);
+  SRTT.tv_sec=srtt_us/1e6;
+  SRTT.tv_usec=srtt_us%1e6;
+  printf("SRTT is %lds %ldus\n", SRTT.tv_sec,SRTT.tv_usec);
+  devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
+  DevRTT.tv_sec = devrtt_us/1e6;
+  DevRTT.tv_usec = devrtt_us%1e6;
+  rto_us=MU*srtt_us+DEE*devrtt_us;
+  RTO.tv_sec= rto_us/1e6;
+  RTO.tv_usec= rto_us%1e6;
+  printf("RTO is %lds %ldus\n", RTO.tv_sec,RTO.tv_usec);
+}
+
 int main(int argc,char* argv[]) {
   if (argc<2) {
     printf("missing arguments\n");
@@ -130,7 +152,6 @@ int main(int argc,char* argv[]) {
       fd_set readfds;
       FD_ZERO(&readfds);
       struct timeval timeout,start,end;
-      struct timeval RTT, SRTT, DevRTT, RTO;
       RTO.tv_sec=1;
       RTO.tv_usec=500000;
       SRTT.tv_usec=10000;
@@ -226,14 +247,7 @@ int main(int argc,char* argv[]) {
             }
           }
           seq++;
-          SRTT.tv_sec+=ALPHA*(RTT.tv_sec-SRTT.tv_sec);
-          SRTT.tv_usec+=ALPHA*(RTT.tv_usec-SRTT.tv_usec);
-          printf("SRTT is %lds %ldus\n", SRTT.tv_sec,SRTT.tv_usec);
-          DevRTT.tv_sec = (1-BETA)*DevRTT.tv_sec+BETA*abs(RTT.tv_sec-SRTT.tv_sec);
-          DevRTT.tv_usec = (1-BETA)*DevRTT.tv_usec+BETA*abs(RTT.tv_usec-SRTT.tv_usec);
-          RTO.tv_sec= MU* SRTT.tv_sec+DEE*DevRTT.tv_sec;
-          RTO.tv_usec= MU* SRTT.tv_usec+DEE*DevRTT.tv_usec;
-          printf("RTO is %lds %ldus\n", RTO.tv_sec,RTO.tv_usec);
+          calcul_RTO();
           if(varmsgsize<MSGSIZE){
             varmsgsize*=2;
           }
