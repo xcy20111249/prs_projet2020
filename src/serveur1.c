@@ -32,14 +32,14 @@ void calcul_RTO(/* arguments */) {
 
   srtt_us+=ALPHA*(rtt_us-srtt_us);
   SRTT.tv_sec=srtt_us/1e6;
-  SRTT.tv_usec=srtt_us%1e6;
+  SRTT.tv_usec=srtt_us%(int)1e6;
   printf("SRTT is %lds %ldus\n", SRTT.tv_sec,SRTT.tv_usec);
   devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   DevRTT.tv_sec = devrtt_us/1e6;
-  DevRTT.tv_usec = devrtt_us%1e6;
+  DevRTT.tv_usec = devrtt_us%(int)1e6;
   rto_us=MU*srtt_us+DEE*devrtt_us;
   RTO.tv_sec= rto_us/1e6;
-  RTO.tv_usec= rto_us%1e6;
+  RTO.tv_usec= rto_us%(int)1e6;
   printf("RTO is %lds %ldus\n", RTO.tv_sec,RTO.tv_usec);
 }
 
