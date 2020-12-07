@@ -63,8 +63,8 @@ int main(int argc,char* argv[]) {
   int socket_frontdesk;
   socket_frontdesk=socket(domaine,type,protocole);
   printf("socket udp est: %d\n", socket_frontdesk);
-  /*sockets[1]=socket(domaine,type,protocole);
-  printf("socket udp-tcp est: %d\n", sockets[1]);*/
+  /*socket_transmission=socket(domaine,type,protocole);
+  printf("socket udp-tcp est: %d\n", socket_transmission);*/
 
   int reuse=1;
   setsockopt(socket_frontdesk,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
@@ -74,10 +74,10 @@ int main(int argc,char* argv[]) {
     perror("Cannot create socket\n");
     return -1;
   }
-  /*setsockopt(sockets[1],SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
-  if (sockets[1]<0){
-    close(sockets[1]);
-    printf("le descripteur est %d\n",sockets[1]);
+  /*setsockopt(socket_transmission,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+  if (socket_transmission<0){
+    close(socket_transmission);
+    printf("le descripteur est %d\n",socket_transmission);
     perror("Cannot create socket\n");
     return -1;
   }*/
@@ -100,9 +100,9 @@ int main(int argc,char* argv[]) {
     close(socket_frontdesk);
     return -1;
   };
-  /*if(bind(sockets[1],(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
+  /*if(bind(socket_transmission,(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
     perror("Bind failed\n");
-    close(sockets[1]);
+    close(socket_transmission);
     return -1;
   };*/
 
@@ -119,17 +119,19 @@ int main(int argc,char* argv[]) {
     printf("%s\n", ackport);
     int goon=1;//control for msg transmission begin
     int con=1;//control of handshake done
+    int socket_transmission;
+
     while (con) {
       int cont=0;
       memset(serverbuffer,0,RCVSIZE);
       recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
 
-      sockets[1]=socket(domaine,type,protocole);
-      printf("socket udp-tcp est: %d\n", sockets[1]);
-      setsockopt(sockets[1],SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
-      if (sockets[1]<0){
-        close(sockets[1]);
-        printf("le descripteur est %d\n",sockets[1]);
+      socket_transmission=socket(domaine,type,protocole);
+      printf("socket udp-tcp est: %d\n", socket_transmission);
+      setsockopt(socket_transmission,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+      if (socket_transmission<0){
+        close(socket_transmission);
+        printf("le descripteur est %d\n",socket_transmission);
         perror("Cannot create socket\n");
         return -1;
       }
@@ -140,9 +142,9 @@ int main(int argc,char* argv[]) {
       my_addr2.sin_port=htons(port_servertcp);
       my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);
 
-      if(bind(sockets[1],(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
+      if(bind(socket_transmission,(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
         perror("Bind failed\n");
-        close(sockets[1]);
+        close(socket_transmission);
         return -1;
       };
 
@@ -196,7 +198,7 @@ int main(int argc,char* argv[]) {
       int cont=1;
       while (cont) {
         memset(serverbuffer,0,RCVSIZE);
-        recvfrom(sockets[1],serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+        recvfrom(socket_transmission,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
         printf("client wants: %s\n", serverbuffer);
         if (strcmp(serverbuffer,"close")==0) {
           cont=0;
@@ -248,21 +250,21 @@ int main(int argc,char* argv[]) {
           printf("package ready\n");
 
           while (1) {
-            FD_SET(sockets[1],&readfds);
+            FD_SET(socket_transmission,&readfds);
             timeout.tv_sec=RTO.tv_sec;
             timeout.tv_usec=RTO.tv_usec;
 
             //printf("setted\n");
-            sendto(sockets[1],msgbuffer,SEQSIZE+len,0,(struct sockaddr*)&client_addr,c_len);
+            sendto(socket_transmission,msgbuffer,SEQSIZE+len,0,(struct sockaddr*)&client_addr,c_len);
             gettimeofday(&start,NULL);
             //printf("%s\n", msgbuffer);
-            int resul=select(sockets[1]+1,&readfds,NULL,NULL,&timeout);
+            int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
 
             //sent msg and wait for ack
-            if (FD_ISSET(sockets[1],&readfds)) {
+            if (FD_ISSET(socket_transmission,&readfds)) {
               //sleep(0.5);
               memset(ackbuffer,0,ACKSIZE);
-              recvfrom(sockets[1],ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+              recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
               gettimeofday(&end,NULL);
               total_us_calcul=1e6*(end.tv_sec-start.tv_sec)+(end.tv_usec-start.tv_usec);
               RTT.tv_sec=total_us_calcul/1e6;
@@ -286,7 +288,7 @@ int main(int argc,char* argv[]) {
             varmsgsize*=2;
           }
         }
-        sendto(sockets[1],"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
+        sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
         printf("transmission done\n");
         fclose(fp);
       }
