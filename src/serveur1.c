@@ -60,21 +60,28 @@ int main(int argc,char* argv[]) {
 
 
   int sockets[2];
-  sockets[0]=socket(domaine,type,protocole);
-  printf("socket udp est: %d\n", sockets[0]);
-  sockets[1]=socket(domaine,type,protocole);
-  printf("socket udp-tcp est: %d\n", sockets[1]);
+  int socket_frontdesk;
+  socket_frontdesk=socket(domaine,type,protocole);
+  printf("socket udp est: %d\n", socket_frontdesk);
+  /*sockets[1]=socket(domaine,type,protocole);
+  printf("socket udp-tcp est: %d\n", sockets[1]);*/
 
   int reuse=1;
-  for (int i = 0; i < 1; i++) {
-    setsockopt(sockets[i],SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
-    if (sockets[i]<0){
-      close(sockets[i]);
-      printf("le descripteur est %d\n",sockets[i]);
-      perror("Cannot create socket\n");
-      return -1;
-    }
+  setsockopt(socket_frontdesk,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+  if (socket_frontdesk<0){
+    close(socket_frontdesk);
+    printf("le descripteur est %d\n",socket_frontdesk);
+    perror("Cannot create socket\n");
+    return -1;
   }
+  /*setsockopt(sockets[1],SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+  if (sockets[1]<0){
+    close(sockets[1]);
+    printf("le descripteur est %d\n",sockets[1]);
+    perror("Cannot create socket\n");
+    return -1;
+  }*/
+
 
   struct sockaddr_in my_addr1;
   memset((char*)&my_addr1,0,sizeof(my_addr1));
@@ -82,22 +89,22 @@ int main(int argc,char* argv[]) {
   my_addr1.sin_port=htons(port_serverudp);
   my_addr1.sin_addr.s_addr=htonl(INADDR_ANY);
 
-  struct sockaddr_in my_addr2;
+  /*struct sockaddr_in my_addr2;
   memset((char*)&my_addr2,0,sizeof(my_addr2));
   my_addr2.sin_family=domaine;
   my_addr2.sin_port=htons(port_servertcp);
-  my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);
+  my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);*/
 
-  if(bind(sockets[0],(struct sockaddr*)&my_addr1,sizeof(my_addr1))<0){
+  if(bind(socket_frontdesk,(struct sockaddr*)&my_addr1,sizeof(my_addr1))<0){
     perror("Bind failed\n");
-    close(sockets[0]);
+    close(socket_frontdesk);
     return -1;
   };
-  if(bind(sockets[1],(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
+  /*if(bind(sockets[1],(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
     perror("Bind failed\n");
     close(sockets[1]);
     return -1;
-  };
+  };*/
 
   struct sockaddr_in client_addr;
   memset((char*)&client_addr,0,sizeof(client_addr));
@@ -115,7 +122,31 @@ int main(int argc,char* argv[]) {
     while (con) {
       int cont=0;
       memset(serverbuffer,0,RCVSIZE);
-      recvfrom(sockets[0],serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+      recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+
+      sockets[1]=socket(domaine,type,protocole);
+      printf("socket udp-tcp est: %d\n", sockets[1]);
+      setsockopt(sockets[1],SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+      if (sockets[1]<0){
+        close(sockets[1]);
+        printf("le descripteur est %d\n",sockets[1]);
+        perror("Cannot create socket\n");
+        return -1;
+      }
+
+      struct sockaddr_in my_addr2;
+      memset((char*)&my_addr2,0,sizeof(my_addr2));
+      my_addr2.sin_family=domaine;
+      my_addr2.sin_port=htons(port_servertcp);
+      my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);
+
+      if(bind(sockets[1],(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
+        perror("Bind failed\n");
+        close(sockets[1]);
+        return -1;
+      };
+
+
       printf("****************\n");
       if (strcmp(serverbuffer,"SYN")==0) {
         printf("client ask for tcp connection\n");
@@ -125,10 +156,10 @@ int main(int argc,char* argv[]) {
         printf("Client port is %d\n", port_client_udp);
 
         while (1) {
-          sendto(sockets[0],ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
+          sendto(socket_frontdesk,ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
           printf("tcp port info sent\n");
           memset(serverbuffer,0,RCVSIZE);
-          recvfrom(sockets[0],serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+          recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
           if (strcmp(serverbuffer,"ACK")==0) {
             printf("handshake done\n");
             con=0;
