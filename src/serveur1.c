@@ -22,14 +22,19 @@
 #define DEE 4
 
 struct timeval RTT, SRTT, DevRTT, RTO;
+int domaine=AF_INET;
+int type=SOCK_DGRAM;
+int protocole=0;
 
-void calcul_RTO(/* arguments */) {
+void calcul_RTO(/* arguments */) {/*cette fonction est vue de calculer le RTO*/
+  /*initialiser les timers en format int */
   int srtt_us, rtt_us, devrtt_us, rto_us;
   srtt_us=1e6*SRTT.tv_sec+SRTT.tv_usec;
   rtt_us=1e6*RTT.tv_sec+RTT.tv_usec;
   devrtt_us=1e6*DevRTT.tv_sec+DevRTT.tv_usec;
   rto_us=1e6*RTO.tv_sec+RTO.tv_usec;
 
+  /*calcul du rto*/
   srtt_us+=ALPHA*(rtt_us-srtt_us);
   SRTT.tv_sec=srtt_us/1e6;
   SRTT.tv_usec=srtt_us%(int)1e6;
@@ -43,6 +48,7 @@ void calcul_RTO(/* arguments */) {
   printf("RTO is %lds %ldus\n", RTO.tv_sec,RTO.tv_usec);
 }
 
+
 int main(int argc,char* argv[]) {
   if (argc<2) {
     printf("missing arguments\n");
@@ -51,9 +57,7 @@ int main(int argc,char* argv[]) {
 
   int port_serverudp=atoi(argv[1]);
   int port_servertcp=8001;
-  int domaine=AF_INET;
-  int type=SOCK_DGRAM;
-  int protocole=0;
+
 
   int sockets[2];
   sockets[0]=socket(domaine,type,protocole);
@@ -94,7 +98,6 @@ int main(int argc,char* argv[]) {
     close(sockets[1]);
     return -1;
   };
-
 
   struct sockaddr_in client_addr;
   memset((char*)&client_addr,0,sizeof(client_addr));
