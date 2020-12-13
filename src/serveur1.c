@@ -59,12 +59,9 @@ int main(int argc,char* argv[]) {
   int port_servertcp=8001;
 
 
-  int sockets[2];
   int socket_frontdesk;
   socket_frontdesk=socket(domaine,type,protocole);
   printf("socket udp est: %d\n", socket_frontdesk);
-  /*socket_transmission=socket(domaine,type,protocole);
-  printf("socket udp-tcp est: %d\n", socket_transmission);*/
 
   int reuse=1;
   setsockopt(socket_frontdesk,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
@@ -74,13 +71,6 @@ int main(int argc,char* argv[]) {
     perror("Cannot create socket\n");
     return -1;
   }
-  /*setsockopt(socket_transmission,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
-  if (socket_transmission<0){
-    close(socket_transmission);
-    printf("le descripteur est %d\n",socket_transmission);
-    perror("Cannot create socket\n");
-    return -1;
-  }*/
 
 
   struct sockaddr_in my_addr1;
@@ -89,22 +79,12 @@ int main(int argc,char* argv[]) {
   my_addr1.sin_port=htons(port_serverudp);
   my_addr1.sin_addr.s_addr=htonl(INADDR_ANY);
 
-  /*struct sockaddr_in my_addr2;
-  memset((char*)&my_addr2,0,sizeof(my_addr2));
-  my_addr2.sin_family=domaine;
-  my_addr2.sin_port=htons(port_servertcp);
-  my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);*/
 
   if(bind(socket_frontdesk,(struct sockaddr*)&my_addr1,sizeof(my_addr1))<0){
     perror("Bind failed\n");
     close(socket_frontdesk);
     return -1;
   };
-  /*if(bind(socket_transmission,(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
-    perror("Bind failed\n");
-    close(socket_transmission);
-    return -1;
-  };*/
 
   struct sockaddr_in client_addr;
   memset((char*)&client_addr,0,sizeof(client_addr));
@@ -126,65 +106,69 @@ int main(int argc,char* argv[]) {
       memset(serverbuffer,0,RCVSIZE);
       recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
 
+      //initialize the socket for transmission
+      socket_transmission=socket(domaine,type,protocole);
+      printf("socket udp-tcp est: %d\n", socket_transmission);
+      setsockopt(socket_transmission,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
+      if (socket_transmission<0){
+        close(socket_transmission);
+        printf("le descripteur est %d\n",socket_transmission);
+        perror("Cannot create socket\n");
+        return -1;
+      }
+
+      struct sockaddr_in my_addr2;
+      memset((char*)&my_addr2,0,sizeof(my_addr2));
+      my_addr2.sin_family=domaine;
+      my_addr2.sin_port=htons(port_servertcp);
+      my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);
+
+      if(bind(socket_transmission,(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
+        perror("Bind failed\n");
+        close(socket_transmission);
+        return -1;
+      };
+
+      //handshake
+      printf("****************\n");
+      if (strcmp(serverbuffer,"SYN")==0) {//connect the client
+        printf("client ask for tcp connection\n");
+        char* ip_client_udp=inet_ntoa(client_addr.sin_addr);
+        int port_client_udp=ntohs(client_addr.sin_port);
+        printf("Client IP is %s\n", ip_client_udp);
+        printf("Client port is %d\n", port_client_udp);
+
+        while (1) {
+          sendto(socket_frontdesk,ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
+          printf("tcp port info sent\n");
+          memset(serverbuffer,0,RCVSIZE);
+          recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+          if (strcmp(serverbuffer,"ACK")==0) {
+            printf("handshake done\n");
+            con=0;
+            break;
+          }
+          cont++;
+          if (cont>=5) {//5 cercles no response
+            goon=0;
+            printf("failed\n");
+            close(socket_transmission);
+            break;
+          }
+          sleep(0.5);
+        }
+      }
+
       pid_t fpid;
       fpid=fork();
       if (fpid<0) {
         printf("error in fork\n");
       }else if (fpid>0) {
         printf("son process pid is %d\n", fpid);
-        sleep(3);
+        close(socket_transmission);
+        //sleep(3);
       } else if (fpid==0) {
-        //initialize the socket for transmission
-        socket_transmission=socket(domaine,type,protocole);
-        printf("socket udp-tcp est: %d\n", socket_transmission);
-        setsockopt(socket_transmission,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
-        if (socket_transmission<0){
-          close(socket_transmission);
-          printf("le descripteur est %d\n",socket_transmission);
-          perror("Cannot create socket\n");
-          return -1;
-        }
-
-        struct sockaddr_in my_addr2;
-        memset((char*)&my_addr2,0,sizeof(my_addr2));
-        my_addr2.sin_family=domaine;
-        my_addr2.sin_port=htons(port_servertcp);
-        my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);
-
-        if(bind(socket_transmission,(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
-          perror("Bind failed\n");
-          close(socket_transmission);
-          return -1;
-        };
-
-        //handshake
-        printf("****************\n");
-        if (strcmp(serverbuffer,"SYN")==0) {
-          printf("client ask for tcp connection\n");
-          char* ip_client_udp=inet_ntoa(client_addr.sin_addr);
-          int port_client_udp=ntohs(client_addr.sin_port);
-          printf("Client IP is %s\n", ip_client_udp);
-          printf("Client port is %d\n", port_client_udp);
-
-          while (1) {
-            sendto(socket_frontdesk,ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
-            printf("tcp port info sent\n");
-            memset(serverbuffer,0,RCVSIZE);
-            recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
-            if (strcmp(serverbuffer,"ACK")==0) {
-              printf("handshake done\n");
-              con=0;
-              break;
-            }
-            cont++;
-            if (cont>=5) {//5 cercles no response
-              goon=0;
-              printf("failed\n");
-              break;
-            }
-            sleep(0.5);
-          }
-        }
+        close(socket_frontdesk);
 
         if (goon) {//begin communication
           FILE *fp;
@@ -192,7 +176,7 @@ int main(int argc,char* argv[]) {
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
-          int varmsgsize=MSGSIZE/8;
+          //int varmsgsize=MSGSIZE/8;
           fd_set readfds;
           FD_ZERO(&readfds);
           struct timeval timeout,start,end;
@@ -203,13 +187,13 @@ int main(int argc,char* argv[]) {
           long total_us_calcul;
 
           printf("go on\n");
-          int cont=1;
-          while (cont) {
+          int conter=1;
+          while (conter) {
             memset(serverbuffer,0,RCVSIZE);
             recvfrom(socket_transmission,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
             printf("client wants: %s\n", serverbuffer);
             if (strcmp(serverbuffer,"close")==0) {
-              cont=0;
+              conter=0;
             }
             sprintf(fname,"%s",serverbuffer);
 
@@ -243,14 +227,14 @@ int main(int argc,char* argv[]) {
               }
 
               printf("sequence is %.6s\n",sequence );
-              char msgbuffer[SEQSIZE+varmsgsize];//whole msg for transmission
-              memset(msgbuffer,0,SEQSIZE+varmsgsize);
+              char msgbuffer[SEQSIZE+MSGSIZE];//whole msg for transmission
+              memset(msgbuffer,0,SEQSIZE+MSGSIZE);
               sprintf(ackmsg,"%s%.6s","ACK",sequence);
               ackmsg[sizeof(ackmsg)-1]='\0';
               printf("should receive %s\n", ackmsg);
 
               memset(tembuffer,0,MSGSIZE);
-              len=fread(tembuffer,1,varmsgsize,fp);
+              len=fread(tembuffer,1,MSGSIZE,fp);
               printf("len of tembuffer %d\n", len);
               fflush(stdout);
               sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
@@ -292,191 +276,26 @@ int main(int argc,char* argv[]) {
               }
               seq++;
               calcul_RTO();
-              if(varmsgsize<MSGSIZE){
+              /*if(varmsgsize<MSGSIZE){
                 varmsgsize*=2;
-              }
+              }*/
             }
             sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
             printf("transmission done\n");
             fclose(fp);
+            conter=0;
           }
         }
         close(socket_transmission);
+        exit(1);
       }
 
-      /*socket_transmission=socket(domaine,type,protocole);
-      printf("socket udp-tcp est: %d\n", socket_transmission);
-      setsockopt(socket_transmission,SOL_SOCKET,SO_REUSEADDR,&reuse,sizeof(reuse));
-      if (socket_transmission<0){
-        close(socket_transmission);
-        printf("le descripteur est %d\n",socket_transmission);
-        perror("Cannot create socket\n");
-        return -1;
-      }
-
-      struct sockaddr_in my_addr2;
-      memset((char*)&my_addr2,0,sizeof(my_addr2));
-      my_addr2.sin_family=domaine;
-      my_addr2.sin_port=htons(port_servertcp);
-      my_addr2.sin_addr.s_addr=htonl(INADDR_ANY);
-
-      if(bind(socket_transmission,(struct sockaddr*)&my_addr2,sizeof(my_addr2))<0){
-        perror("Bind failed\n");
-        close(socket_transmission);
-        return -1;
-      };*/
-
-
-      /*printf("****************\n");
-      if (strcmp(serverbuffer,"SYN")==0) {
-        printf("client ask for tcp connection\n");
-        char* ip_client_udp=inet_ntoa(client_addr.sin_addr);
-        int port_client_udp=ntohs(client_addr.sin_port);
-        printf("Client IP is %s\n", ip_client_udp);
-        printf("Client port is %d\n", port_client_udp);
-
-        while (1) {
-          sendto(socket_frontdesk,ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
-          printf("tcp port info sent\n");
-          memset(serverbuffer,0,RCVSIZE);
-          recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
-          if (strcmp(serverbuffer,"ACK")==0) {
-            printf("handshake done\n");
-            con=0;
-            break;
-          }
-          cont++;
-          if (cont>=5) {//5 cercles no response
-            goon=0;
-            printf("failed\n");
-            break;
-          }
-          sleep(0.5);
-        }
-      }
-    }*/
-    //handshake done, beginning the transmission
-    /*if (goon) {//begin communication
-      FILE *fp;
-      char ackbuffer[ACKSIZE];//ack msg
-      char tembuffer[MSGSIZE];//data of the pic
-      char fname[RCVSIZE];
-      int len;
-      int varmsgsize=MSGSIZE/8;
-      fd_set readfds;
-      FD_ZERO(&readfds);
-      struct timeval timeout,start,end;
-      RTO.tv_sec=1;
-      RTO.tv_usec=500000;
-      SRTT.tv_usec=10000;
-      SRTT.tv_sec=0;
-      long total_us_calcul;
-
-      printf("go on\n");
-      int cont=1;
-      while (cont) {
-        memset(serverbuffer,0,RCVSIZE);
-        recvfrom(socket_transmission,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
-        printf("client wants: %s\n", serverbuffer);
-        if (strcmp(serverbuffer,"close")==0) {
-          cont=0;
-        }
-        sprintf(fname,"%s",serverbuffer);
-
-        //client ask for a non exist file
-        if ((fp=fopen(fname,"rb"))==NULL) {
-          printf("file not found\n");
-          exit(1);
-        }
-
-        printf("transmission begin\n");
-
-        fflush(stdout);
-        int seq=1;
-        char ackmsg[10];
-
-        while (!feof(fp)) {
-          fd_set readfds;
-          FD_ZERO(&readfds);
-          char sequence[6];
-          memset(sequence,0,6);
-          int seqint=seq;
-          int r;
-          char exchange[2];
-
-          //sequence number from int to char
-          for (int i = 0; i < sizeof(sequence); i++) {
-            r=seqint%10;
-            sprintf(exchange,"%d",r);
-            sequence[sizeof(sequence)-1-i]=exchange[0];
-            seqint=(seqint-r)/10;
-          }
-
-          printf("sequence is %.6s\n",sequence );
-          char msgbuffer[SEQSIZE+varmsgsize];//whole msg for transmission
-          memset(msgbuffer,0,SEQSIZE+varmsgsize);
-          sprintf(ackmsg,"%s%.6s","ACK",sequence);
-          ackmsg[sizeof(ackmsg)-1]='\0';
-          printf("should receive %s\n", ackmsg);
-
-          memset(tembuffer,0,MSGSIZE);
-          len=fread(tembuffer,1,varmsgsize,fp);
-          printf("len of tembuffer %d\n", len);
-          fflush(stdout);
-          sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
-          fflush(stdout);
-          printf("package ready\n");
-
-          while (1) {
-            FD_SET(socket_transmission,&readfds);
-            timeout.tv_sec=RTO.tv_sec;
-            timeout.tv_usec=RTO.tv_usec;
-
-            //printf("setted\n");
-            sendto(socket_transmission,msgbuffer,SEQSIZE+len,0,(struct sockaddr*)&client_addr,c_len);
-            gettimeofday(&start,NULL);
-            //printf("%s\n", msgbuffer);
-            int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
-
-            //sent msg and wait for ack
-            if (FD_ISSET(socket_transmission,&readfds)) {
-              //sleep(0.5);
-              memset(ackbuffer,0,ACKSIZE);
-              recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
-              gettimeofday(&end,NULL);
-              total_us_calcul=1e6*(end.tv_sec-start.tv_sec)+(end.tv_usec-start.tv_usec);
-              RTT.tv_sec=total_us_calcul/1e6;
-              RTT.tv_usec=total_us_calcul-RTT.tv_sec;
-              printf("RTT is %lds %ldus\n", RTT.tv_sec,RTT.tv_usec);
-              if(strcmp(ackbuffer,ackmsg)==0){
-
-                printf("msg %s rcved\n", ackmsg);
-                break;
-              }
-            }
-            if(resul==0){
-              printf("timeout no response\n");
-              sleep(1);
-              continue;
-            }
-          }
-          seq++;
-          calcul_RTO();
-          if(varmsgsize<MSGSIZE){
-            varmsgsize*=2;
-          }
-        }
-        sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
-        printf("transmission done\n");
-        fclose(fp);
-      }
-    }*/
     }
-    exit(0);
+
+    //exit(1);
+    sleep(5);
   }
-  for (int i = 0; i < 2; i++) {
-    close(sockets[i]);
-  }
+
   close(socket_frontdesk);
 
   return 0;
