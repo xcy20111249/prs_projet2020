@@ -10,6 +10,7 @@
 #include <sys/time.h>
 #include <errno.h>
 #include <math.h>
+#include <sys/stat.h>
 
 #define RCVSIZE 20
 #define ACKPORT 12
@@ -20,11 +21,58 @@
 #define BETA 0.25
 #define MU 1
 #define DEE 4
+#define POOLSIZE 100
+#define baseport 8000
 
 struct timeval RTT, SRTT, DevRTT, RTO;
 int domaine=AF_INET;
 int type=SOCK_DGRAM;
 int protocole=0;
+int ports_pool[POOLSIZE];
+struct package_info
+{
+  char ack_sequence[ACKSIZE], pack_msg[SEQSIZE+MSGSIZE];
+  struct timeval t_send, t_rcvd, RTT, SRTT, DevRTT, RTO;
+  int pack_ack;
+};
+
+void calcul_package_RTO(struct package_info package_info) {/*cette fonction est vue de calculer le RTO*/
+  /*initialiser les timers en format int */
+  int srtt_us, rtt_us, devrtt_us, rto_us;
+  srtt_us=1e6*package_info.SRTT.tv_sec+package_info.SRTT.tv_usec;
+  rtt_us=1e6*package_info.RTT.tv_sec+package_info.RTT.tv_usec;
+  devrtt_us=1e6*package_info.DevRTT.tv_sec+package_info.DevRTT.tv_usec;
+  rto_us=1e6*package_info.RTO.tv_sec+package_info.RTO.tv_usec;
+
+  /*calcul du rto*/
+  srtt_us+=ALPHA*(rtt_us-srtt_us);
+  package_info.SRTT.tv_sec=srtt_us/1e6;
+  package_info.SRTT.tv_usec=srtt_us%(int)1e6;
+  printf("SRTT is %lds %ldus\n", package_info.SRTT.tv_sec,package_info.SRTT.tv_usec);
+  devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
+  package_info.DevRTT.tv_sec = devrtt_us/1e6;
+  package_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
+  rto_us=MU*srtt_us+DEE*devrtt_us;
+  package_info.RTO.tv_sec= rto_us/1e6;
+  package_info.RTO.tv_usec= rto_us%(int)1e6;
+  printf("RTO is %lds %ldus\n", package_info.RTO.tv_sec,package_info.RTO.tv_usec);
+}
+
+int get_available_port(){/*find a port which is available for info transmission*/
+  int port;
+  for(int i=0; i<POOLSIZE; i++){
+    if (ports_pool[i]) {
+      printf("%d\n", i);
+      ports_pool[i]=0;
+      port=i+baseport;
+      printf("%d\n", port);
+      return port;
+    }
+  }
+  printf("no port available, plz wait\n");
+  sleep(5);
+  return get_available_port();
+}
 
 void calcul_RTO(/* arguments */) {/*cette fonction est vue de calculer le RTO*/
   /*initialiser les timers en format int */
@@ -56,7 +104,7 @@ int main(int argc,char* argv[]) {
   }
 
   int port_serverudp=atoi(argv[1]);
-  int port_servertcp=8001;
+  int port_servertcp;
 
 
   int socket_frontdesk;
@@ -90,13 +138,16 @@ int main(int argc,char* argv[]) {
   memset((char*)&client_addr,0,sizeof(client_addr));
   socklen_t c_len = sizeof(client_addr);
 
+  /*initialize a list of POOLSIZE ports for info transmission*/
+  for (int i=0;i<POOLSIZE;i++){
+    ports_pool[i]=1;
+  }
+
   printf("waiting for connection\n");
   for (;;) {
     char serverbuffer[RCVSIZE];
     char ackport[ACKPORT];
     ackport[ACKPORT-1]='\0';
-    sprintf(ackport,"%s%d","SYN-ACK",port_servertcp);
-    printf("%s\n", ackport);
     int goon=1;//control for msg transmission begin
     int con=1;//control of handshake done
     int socket_transmission;
@@ -116,6 +167,27 @@ int main(int argc,char* argv[]) {
         perror("Cannot create socket\n");
         return -1;
       }
+
+      //get a available port from ports pool
+      int portcont=1;
+      while (portcont) {
+        for(int i=0; i<POOLSIZE; i++){
+          if (ports_pool[i]) {
+            ports_pool[i]=0;
+            port_servertcp=i+baseport;
+            portcont=0;
+            break;
+          }
+        }
+        if (portcont){
+          printf("no port available, plz wait\n");
+          sleep(5);
+        }
+      }
+
+      printf("port for info transmission is %d\n", port_servertcp);
+      sprintf(ackport,"%s%d","SYN-ACK",port_servertcp);
+      printf("%s\n", ackport);
 
       struct sockaddr_in my_addr2;
       memset((char*)&my_addr2,0,sizeof(my_addr2));
@@ -163,10 +235,9 @@ int main(int argc,char* argv[]) {
       fpid=fork();
       if (fpid<0) {
         printf("error in fork\n");
-      }else if (fpid>0) {
+      }else if (fpid>0) {//father process close socket for transmission and wait for new connection
         printf("son process pid is %d\n", fpid);
         close(socket_transmission);
-        //sleep(3);
       } else if (fpid==0) {
         close(socket_frontdesk);
 
@@ -176,6 +247,7 @@ int main(int argc,char* argv[]) {
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
+          int cwnd=1;
           //int varmsgsize=MSGSIZE/8;
           fd_set readfds;
           FD_ZERO(&readfds);
@@ -203,15 +275,34 @@ int main(int argc,char* argv[]) {
               exit(1);
             }
 
+            //get file size
+            struct stat statbuf;
+            stat(fname,&statbuf);
+            int file_size=statbuf.st_size;
+            printf("file size is %d\n", file_size);
+
+            //get package number
+            int pak_num=file_size/MSGSIZE;
+            if (file_size%MSGSIZE!=0){
+              pak_num+=1;
+            }
+            printf("total package number is %d\n", pak_num);
+
+            struct package_info paquets[pak_num];
+            for (int i = 0; i < pak_num; i++) {
+              paquets[i].pack_ack=0;
+            }
+
             printf("transmission begin\n");
 
             fflush(stdout);
             int seq=1;
             char ackmsg[10];
 
+            //prepare all packages for transmission
             while (!feof(fp)) {
-              fd_set readfds;
-              FD_ZERO(&readfds);
+              //fd_set readfds;
+              //FD_ZERO(&readfds);
               char sequence[6];
               memset(sequence,0,6);
               int seqint=seq;
@@ -231,30 +322,27 @@ int main(int argc,char* argv[]) {
               memset(msgbuffer,0,SEQSIZE+MSGSIZE);
               sprintf(ackmsg,"%s%.6s","ACK",sequence);
               ackmsg[sizeof(ackmsg)-1]='\0';
-              printf("should receive %s\n", ackmsg);
+              sprintf(paquets[seq-1].ack_sequence,"%s",ackmsg);
+              printf("should receive %s\n", paquets[seq-1].ack_sequence);
 
               memset(tembuffer,0,MSGSIZE);
               len=fread(tembuffer,1,MSGSIZE,fp);
               printf("len of tembuffer %d\n", len);
-              fflush(stdout);
               sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
-              fflush(stdout);
-              printf("package ready\n");
+              sprintf(paquets[seq-1].pack_msg,"%s",msgbuffer);
+              printf("package %d ready\n", seq);
 
-              while (1) {
+              /*while (1) {
                 FD_SET(socket_transmission,&readfds);
                 timeout.tv_sec=RTO.tv_sec;
                 timeout.tv_usec=RTO.tv_usec;
 
-                //printf("setted\n");
                 sendto(socket_transmission,msgbuffer,SEQSIZE+len,0,(struct sockaddr*)&client_addr,c_len);
                 gettimeofday(&start,NULL);
-                //printf("%s\n", msgbuffer);
                 int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
 
                 //sent msg and wait for ack
                 if (FD_ISSET(socket_transmission,&readfds)) {
-                  //sleep(0.5);
                   memset(ackbuffer,0,ACKSIZE);
                   recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
                   gettimeofday(&end,NULL);
@@ -263,7 +351,6 @@ int main(int argc,char* argv[]) {
                   RTT.tv_usec=total_us_calcul-RTT.tv_sec;
                   printf("RTT is %lds %ldus\n", RTT.tv_sec,RTT.tv_usec);
                   if(strcmp(ackbuffer,ackmsg)==0){
-
                     printf("msg %s rcved\n", ackmsg);
                     break;
                   }
@@ -273,12 +360,64 @@ int main(int argc,char* argv[]) {
                   sleep(1);
                   continue;
                 }
-              }
-              seq++;
-              calcul_RTO();
-              /*if(varmsgsize<MSGSIZE){
-                varmsgsize*=2;
               }*/
+              seq++;
+            }
+
+            seq=1;
+            for (int i = 0; i < pak_num; i++) {
+              fd_set readfds;
+              FD_ZERO(&readfds);
+              /*char sequence[6];
+              memset(sequence,0,6);
+              int seqint=seq;
+              int r;
+              char exchange[2];*/
+
+              for (int j = 0; j < cwnd; j++) {
+
+                printf("sequence is %.6d\n",seq );
+                printf("should receive %s\n", paquets[seq-1].ack_sequence);
+
+                /*memset(tembuffer,0,MSGSIZE);
+                len=fread(tembuffer,1,MSGSIZE,fp);
+                printf("len of tembuffer %d\n", len);
+                sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
+                sprintf(paquets[seq-1].pack_msg,"%s",msgbuffer);
+                printf("package ready\n");*/
+
+                while (1) {
+                  FD_SET(socket_transmission,&readfds);
+                  timeout.tv_sec=RTO.tv_sec;
+                  timeout.tv_usec=RTO.tv_usec;
+
+                  sendto(socket_transmission,paquets[seq-1].pack_msg,sizeof(paquets[seq-1].pack_msg),0,(struct sockaddr*)&client_addr,c_len);
+                  gettimeofday(&start,NULL);
+                  int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
+
+                  //sent msg and wait for ack
+                  if (FD_ISSET(socket_transmission,&readfds)) {
+                    memset(ackbuffer,0,ACKSIZE);
+                    recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+                    gettimeofday(&end,NULL);
+                    total_us_calcul=1e6*(end.tv_sec-start.tv_sec)+(end.tv_usec-start.tv_usec);
+                    RTT.tv_sec=total_us_calcul/1e6;
+                    RTT.tv_usec=total_us_calcul-RTT.tv_sec;
+                    printf("RTT is %lds %ldus\n", RTT.tv_sec,RTT.tv_usec);
+                    if(strcmp(ackbuffer,paquets[seq-1].ack_sequence)==0){
+                      printf("msg %s rcved\n", ackbuffer);
+                      break;
+                    }
+                  }
+                  if(resul==0){
+                    printf("timeout no response\n");
+                    sleep(1);
+                    continue;
+                  }
+                }
+                seq++;
+                calcul_RTO();
+              }
             }
             sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
             printf("transmission done\n");
@@ -287,13 +426,16 @@ int main(int argc,char* argv[]) {
           }
         }
         close(socket_transmission);
+        ports_pool[port_servertcp-baseport]=1;
+        printf("port used %d is now %d\n", port_servertcp, ports_pool[port_servertcp-baseport]);
+        printf("port %d closed\n", port_servertcp);
         exit(1);
       }
 
     }
 
     //exit(1);
-    sleep(5);
+    //sleep(5);
   }
 
   close(socket_frontdesk);
