@@ -255,7 +255,7 @@ int main(int argc,char* argv[]) {
           int cwnd=10;
           fd_set readfds;
           FD_ZERO(&readfds);
-          struct timeval timeout,start,end;
+          struct timeval timeout;
           RTO.tv_sec=1;
           RTO.tv_usec=500000;
           SRTT.tv_usec=10000;
@@ -311,6 +311,7 @@ int main(int argc,char* argv[]) {
             char ackmsg[10];
 
             //char whole_file[file_size];
+            memset(whole_file,0,sizeof(whole_file));
             fread (whole_file,1,file_size,fp);
             //prepare all packages for transmission
             for (int i = 0; i < pak_num; i++) {
@@ -333,9 +334,8 @@ int main(int argc,char* argv[]) {
               memset(msgbuffer,0,SEQSIZE+MSGSIZE);
               sprintf(ackmsg,"%s%.6s","ACK",sequence);
               ackmsg[sizeof(ackmsg)-1]='\0';
-              printf("ackmsg %s\n", ackmsg);
               sprintf(paquets[i].ack_sequence,"%s",ackmsg);
-              printf("should receive %s\n", paquets[i].ack_sequence);
+              //printf("should receive %s\n", paquets[i].ack_sequence);
 
               memset(tembuffer,0,MSGSIZE);
               len=MSGSIZE;
@@ -343,7 +343,7 @@ int main(int argc,char* argv[]) {
                 len=file_size-i*MSGSIZE;
               }
               memcpy(tembuffer,whole_file+i*MSGSIZE,len);
-              printf("len of tembuffer %d\n", len);
+              //printf("len of tembuffer %d\n", len);
               sprintf(msgbuffer,"%.6s",sequence);
               memcpy(msgbuffer+6,tembuffer,len);
               //memcpy(paquets[i].pack_msg,msgbuffer,len+6);
@@ -353,7 +353,6 @@ int main(int argc,char* argv[]) {
 
               //seq++;
             }
-
 
             //prepare all packages for transmission
             /*while (!feof(fp)) {
@@ -394,7 +393,70 @@ int main(int argc,char* argv[]) {
 
             int file_end=0;
             int seq=1;
+            int last_seq_ack=0;
+            int last_seq_env=0;
+            int end_window;
+
             while (!file_end) {
+              end_window=last_seq_ack+cwnd;
+              if (end_window>pak_num) {
+                end_window=pak_num;
+              }
+
+              //send all packages in slide window
+              for (int i = last_seq_env; i < end_window; i++) {
+                //printf("sequence is %.6d\n",i+1);
+                //printf("should receive %s\n", paquets[i].ack_sequence);
+                char msgbuffer[MSGSIZE+6];
+                memset(tembuffer,0,MSGSIZE);
+                memcpy(tembuffer,whole_file+seq*MSGSIZE,paquets[i].pac_taille-6);
+                memset(msgbuffer,0,MSGSIZE+6);
+                sprintf(msgbuffer,"%.6d",i+1);
+                memcpy(msgbuffer+6,tembuffer,len);
+                sendto(socket_transmission,msgbuffer,paquets[i].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
+                printf("package %d send\n", i+1);
+                gettimeofday(&paquets[i].t_send,NULL);
+                last_seq_env=i;
+              }
+
+              fd_set readfds;
+              FD_ZERO(&readfds);
+              FD_SET(socket_transmission,&readfds);
+              timeout.tv_sec=paquets[last_seq_ack].RTO.tv_sec;
+              timeout.tv_usec=paquets[last_seq_ack].RTO.tv_usec;
+              int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
+
+              //waiting for ack
+              if (FD_ISSET(socket_transmission,&readfds)) {
+                memset(ackbuffer,0,ACKSIZE);
+                recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+                char sequence[6];
+                int seqack;
+                memset(sequence,0,6);
+                memcpy(sequence,ackbuffer+3,6);
+                seqack=atoi(sequence);
+                if (seqack>last_seq_ack) {
+                  last_seq_ack=seqack;
+                }
+                gettimeofday(&paquets[seqack].t_rcvd,NULL);
+                total_us_calcul=1e6*(paquets[seqack].t_rcvd.tv_sec-paquets[seqack].t_send.tv_sec)+(paquets[seqack].t_rcvd.tv_usec-paquets[seqack].t_send.tv_usec);
+                paquets[seqack].RTT.tv_sec=total_us_calcul/1e6;
+                paquets[seqack].RTT.tv_usec=total_us_calcul-paquets[seqack].RTT.tv_sec;
+                printf("RTT is %lds %ldus\n", paquets[seqack].RTT.tv_sec,paquets[seqack].RTT.tv_usec);
+                calcul_package_RTO(paquets[seqack]);
+              }
+              if(resul==0){
+                printf("timeout, retrans pacakge %d\n",last_seq_ack+1);
+                sleep(1);
+              }
+
+              //all pacakges transed and acked
+              if (last_seq_ack+1==pak_num) {
+                file_end=1;
+              }
+            }
+
+            /*while (!file_end) {
               for (int i = 0; i < pak_num; i++) {
                 fd_set readfds;
                 FD_ZERO(&readfds);
@@ -450,7 +512,7 @@ int main(int argc,char* argv[]) {
                 }
               }
               file_end=1;
-            }
+            }*/
             sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
             printf("transmission done\n");
             fclose(fp);
