@@ -33,7 +33,7 @@ struct package_info
 {
   char ack_sequence[ACKSIZE], pack_msg[SEQSIZE+MSGSIZE];
   struct timeval t_send, t_rcvd, RTT, SRTT, DevRTT, RTO;
-  int pack_ack;
+  int pack_ack, pac_taille;
 };
 
 void calcul_package_RTO(struct package_info package_info) {/*cette fonction est vue de calculer le RTO*/
@@ -329,8 +329,11 @@ int main(int argc,char* argv[]) {
               memset(tembuffer,0,MSGSIZE);
               len=fread(tembuffer,1,MSGSIZE,fp);
               printf("len of tembuffer %d\n", len);
-              sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
-              sprintf(paquets[seq-1].pack_msg,"%s",msgbuffer);
+              sprintf(msgbuffer,"%.6s",sequence);
+              memcpy(msgbuffer+6,tembuffer,len);
+              memcpy(paquets[seq-1].pack_msg,msgbuffer,len+6);
+              paquets[seq-1].pac_taille=len+6;
+              //sprintf(paquets[seq-1].pack_msg,"%s",msgbuffer);
               printf("package %.6d ready\n", seq);
 
               seq++;
@@ -353,7 +356,7 @@ int main(int argc,char* argv[]) {
                     timeout.tv_sec=RTO.tv_sec;
                     timeout.tv_usec=RTO.tv_usec;
 
-                    sendto(socket_transmission,paquets[seq-1].pack_msg,sizeof(paquets[seq-1].pack_msg),0,(struct sockaddr*)&client_addr,c_len);
+                    sendto(socket_transmission,paquets[seq-1].pack_msg,paquets[seq-1].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
                     gettimeofday(&start,NULL);
                     int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
 
