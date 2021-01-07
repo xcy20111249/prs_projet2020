@@ -402,6 +402,7 @@ int main(int argc,char* argv[]) {
               if (end_window>pak_num) {
                 end_window=pak_num;
               }
+              printf("%d\n", end_window);
 
               //send all packages in slide window
               for (int i = last_seq_env; i < end_window; i++) {
