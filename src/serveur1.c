@@ -248,7 +248,6 @@ int main(int argc,char* argv[]) {
           char fname[RCVSIZE];
           int len;
           int cwnd=1;
-          //int varmsgsize=MSGSIZE/8;
           fd_set readfds;
           FD_ZERO(&readfds);
           struct timeval timeout,start,end;
@@ -292,6 +291,10 @@ int main(int argc,char* argv[]) {
             for (int i = 0; i < pak_num; i++) {
               paquets[i].pack_ack=0;
             }
+            paquets[0].RTO.tv_sec=1;
+            paquets[0].RTO.tv_usec=500000;
+            paquets[0].SRTT.tv_usec=10000;
+            paquets[0].SRTT.tv_sec=0;
 
             printf("transmission begin\n");
 
@@ -301,8 +304,6 @@ int main(int argc,char* argv[]) {
 
             //prepare all packages for transmission
             while (!feof(fp)) {
-              //fd_set readfds;
-              //FD_ZERO(&readfds);
               char sequence[6];
               memset(sequence,0,6);
               int seqint=seq;
@@ -330,94 +331,57 @@ int main(int argc,char* argv[]) {
               printf("len of tembuffer %d\n", len);
               sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
               sprintf(paquets[seq-1].pack_msg,"%s",msgbuffer);
-              printf("package %d ready\n", seq);
+              printf("package %.6d ready\n", seq);
 
-              /*while (1) {
-                FD_SET(socket_transmission,&readfds);
-                timeout.tv_sec=RTO.tv_sec;
-                timeout.tv_usec=RTO.tv_usec;
-
-                sendto(socket_transmission,msgbuffer,SEQSIZE+len,0,(struct sockaddr*)&client_addr,c_len);
-                gettimeofday(&start,NULL);
-                int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
-
-                //sent msg and wait for ack
-                if (FD_ISSET(socket_transmission,&readfds)) {
-                  memset(ackbuffer,0,ACKSIZE);
-                  recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
-                  gettimeofday(&end,NULL);
-                  total_us_calcul=1e6*(end.tv_sec-start.tv_sec)+(end.tv_usec-start.tv_usec);
-                  RTT.tv_sec=total_us_calcul/1e6;
-                  RTT.tv_usec=total_us_calcul-RTT.tv_sec;
-                  printf("RTT is %lds %ldus\n", RTT.tv_sec,RTT.tv_usec);
-                  if(strcmp(ackbuffer,ackmsg)==0){
-                    printf("msg %s rcved\n", ackmsg);
-                    break;
-                  }
-                }
-                if(resul==0){
-                  printf("timeout no response\n");
-                  sleep(1);
-                  continue;
-                }
-              }*/
               seq++;
             }
 
+            int file_end=0;
             seq=1;
-            for (int i = 0; i < pak_num; i++) {
-              fd_set readfds;
-              FD_ZERO(&readfds);
-              /*char sequence[6];
-              memset(sequence,0,6);
-              int seqint=seq;
-              int r;
-              char exchange[2];*/
+            while (!file_end) {
+              for (int i = 0; i < pak_num; i++) {
+                fd_set readfds;
+                FD_ZERO(&readfds);
 
-              for (int j = 0; j < cwnd; j++) {
+                for (int j = 0; j < cwnd; j++) {
 
-                printf("sequence is %.6d\n",seq );
-                printf("should receive %s\n", paquets[seq-1].ack_sequence);
+                  printf("sequence is %.6d\n",seq);
+                  printf("should receive %s\n", paquets[seq-1].ack_sequence);
 
-                /*memset(tembuffer,0,MSGSIZE);
-                len=fread(tembuffer,1,MSGSIZE,fp);
-                printf("len of tembuffer %d\n", len);
-                sprintf(msgbuffer,"%.6s%s",sequence,tembuffer);
-                sprintf(paquets[seq-1].pack_msg,"%s",msgbuffer);
-                printf("package ready\n");*/
+                  while (1) {
+                    FD_SET(socket_transmission,&readfds);
+                    timeout.tv_sec=RTO.tv_sec;
+                    timeout.tv_usec=RTO.tv_usec;
 
-                while (1) {
-                  FD_SET(socket_transmission,&readfds);
-                  timeout.tv_sec=RTO.tv_sec;
-                  timeout.tv_usec=RTO.tv_usec;
+                    sendto(socket_transmission,paquets[seq-1].pack_msg,sizeof(paquets[seq-1].pack_msg),0,(struct sockaddr*)&client_addr,c_len);
+                    gettimeofday(&start,NULL);
+                    int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
 
-                  sendto(socket_transmission,paquets[seq-1].pack_msg,sizeof(paquets[seq-1].pack_msg),0,(struct sockaddr*)&client_addr,c_len);
-                  gettimeofday(&start,NULL);
-                  int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
-
-                  //sent msg and wait for ack
-                  if (FD_ISSET(socket_transmission,&readfds)) {
-                    memset(ackbuffer,0,ACKSIZE);
-                    recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
-                    gettimeofday(&end,NULL);
-                    total_us_calcul=1e6*(end.tv_sec-start.tv_sec)+(end.tv_usec-start.tv_usec);
-                    RTT.tv_sec=total_us_calcul/1e6;
-                    RTT.tv_usec=total_us_calcul-RTT.tv_sec;
-                    printf("RTT is %lds %ldus\n", RTT.tv_sec,RTT.tv_usec);
-                    if(strcmp(ackbuffer,paquets[seq-1].ack_sequence)==0){
-                      printf("msg %s rcved\n", ackbuffer);
-                      break;
+                    //sent msg and wait for ack
+                    if (FD_ISSET(socket_transmission,&readfds)) {
+                      memset(ackbuffer,0,ACKSIZE);
+                      recvfrom(socket_transmission,ackbuffer,ACKSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+                      gettimeofday(&end,NULL);
+                      total_us_calcul=1e6*(end.tv_sec-start.tv_sec)+(end.tv_usec-start.tv_usec);
+                      RTT.tv_sec=total_us_calcul/1e6;
+                      RTT.tv_usec=total_us_calcul-RTT.tv_sec;
+                      printf("RTT is %lds %ldus\n", RTT.tv_sec,RTT.tv_usec);
+                      if(strcmp(ackbuffer,paquets[seq-1].ack_sequence)==0){
+                        printf("msg %s rcved\n", ackbuffer);
+                        break;
+                      }
+                    }
+                    if(resul==0){
+                      printf("timeout no response\n");
+                      //sleep(1);
+                      continue;
                     }
                   }
-                  if(resul==0){
-                    printf("timeout no response\n");
-                    sleep(1);
-                    continue;
-                  }
+                  seq++;
+                  calcul_RTO();
                 }
-                seq++;
-                calcul_RTO();
               }
+              file_end=1;
             }
             sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
             printf("transmission done\n");
