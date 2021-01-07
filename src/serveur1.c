@@ -31,10 +31,11 @@ int protocole=0;
 int ports_pool[POOLSIZE];
 struct package_info
 {
-  char ack_sequence[ACKSIZE], pack_msg[SEQSIZE+MSGSIZE];
+  char ack_sequence[ACKSIZE];
   struct timeval t_send, t_rcvd, RTT, SRTT, DevRTT, RTO;
   int pack_ack, pac_taille;
 };
+char whole_file[1000000000];
 
 void calcul_package_RTO(struct package_info package_info) {/*cette fonction est vue de calculer le RTO*/
   /*initialiser les timers en format int */
@@ -119,7 +120,6 @@ int main(int argc,char* argv[]) {
     perror("Cannot create socket\n");
     return -1;
   }
-
 
   struct sockaddr_in my_addr1;
   memset((char*)&my_addr1,0,sizeof(my_addr1));
@@ -241,13 +241,18 @@ int main(int argc,char* argv[]) {
       } else if (fpid==0) {
         close(socket_frontdesk);
 
+        struct timeval commence_trans, terminus_trans;//calcul debit
+        long time_trans;
+        int file_size;
+
+
         if (goon) {//begin communication
           FILE *fp;
           char ackbuffer[ACKSIZE];//ack msg
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
-          int cwnd=1;
+          int cwnd=10;
           fd_set readfds;
           FD_ZERO(&readfds);
           struct timeval timeout,start,end;
@@ -258,6 +263,9 @@ int main(int argc,char* argv[]) {
           long total_us_calcul;
 
           printf("go on\n");
+
+          gettimeofday(&commence_trans,NULL);
+
           int conter=1;
           while (conter) {
             memset(serverbuffer,0,RCVSIZE);
@@ -277,7 +285,7 @@ int main(int argc,char* argv[]) {
             //get file size
             struct stat statbuf;
             stat(fname,&statbuf);
-            int file_size=statbuf.st_size;
+            file_size=statbuf.st_size;
             printf("file size is %d\n", file_size);
 
             //get package number
@@ -299,11 +307,56 @@ int main(int argc,char* argv[]) {
             printf("transmission begin\n");
 
             fflush(stdout);
-            int seq=1;
+            //int seq=1;
             char ackmsg[10];
 
+            //char whole_file[file_size];
+            fread (whole_file,1,file_size,fp);
             //prepare all packages for transmission
-            while (!feof(fp)) {
+            for (int i = 0; i < pak_num; i++) {
+              char sequence[6];
+              memset(sequence,0,6);
+              int seqint=i+1;
+              int r;
+              char exchange[2];
+
+              //sequence number from int to char
+              for (int j = 0; j < sizeof(sequence); j++) {
+                r=seqint%10;
+                sprintf(exchange,"%d",r);
+                sequence[sizeof(sequence)-1-j]=exchange[0];
+                seqint=(seqint-r)/10;
+              }
+
+              //printf("sequence is %.6s\n",sequence );
+              char msgbuffer[SEQSIZE+MSGSIZE];//whole msg for transmission
+              memset(msgbuffer,0,SEQSIZE+MSGSIZE);
+              sprintf(ackmsg,"%s%.6s","ACK",sequence);
+              ackmsg[sizeof(ackmsg)-1]='\0';
+              printf("ackmsg %s\n", ackmsg);
+              sprintf(paquets[i].ack_sequence,"%s",ackmsg);
+              printf("should receive %s\n", paquets[i].ack_sequence);
+
+              memset(tembuffer,0,MSGSIZE);
+              len=MSGSIZE;
+              if (file_size-i*MSGSIZE<MSGSIZE){
+                len=file_size-i*MSGSIZE;
+              }
+              memcpy(tembuffer,whole_file+i*MSGSIZE,len);
+              printf("len of tembuffer %d\n", len);
+              sprintf(msgbuffer,"%.6s",sequence);
+              memcpy(msgbuffer+6,tembuffer,len);
+              //memcpy(paquets[i].pack_msg,msgbuffer,len+6);
+              paquets[i].pac_taille=len+6;
+              //sprintf(paquets[seq-1].pack_msg,"%s",msgbuffer);
+              printf("package %.6d ready\n", i+1);
+
+              //seq++;
+            }
+
+
+            //prepare all packages for transmission
+            /*while (!feof(fp)) {
               char sequence[6];
               memset(sequence,0,6);
               int seqint=seq;
@@ -337,10 +390,10 @@ int main(int argc,char* argv[]) {
               printf("package %.6d ready\n", seq);
 
               seq++;
-            }
+            }*/
 
             int file_end=0;
-            seq=1;
+            int seq=1;
             while (!file_end) {
               for (int i = 0; i < pak_num; i++) {
                 fd_set readfds;
@@ -349,14 +402,26 @@ int main(int argc,char* argv[]) {
                 for (int j = 0; j < cwnd; j++) {
 
                   printf("sequence is %.6d\n",seq);
-                  printf("should receive %s\n", paquets[seq-1].ack_sequence);
+                  printf("should receive %s\n", paquets[i].ack_sequence);
 
                   while (1) {
                     FD_SET(socket_transmission,&readfds);
                     timeout.tv_sec=RTO.tv_sec;
                     timeout.tv_usec=RTO.tv_usec;
 
-                    sendto(socket_transmission,paquets[seq-1].pack_msg,paquets[seq-1].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
+                    char msgbuffer[MSGSIZE+6];
+                    memset(tembuffer,0,MSGSIZE);
+                    len=MSGSIZE;
+                    if (file_size-i*MSGSIZE<MSGSIZE){
+                      len=file_size-i*MSGSIZE;
+                    }
+                    memcpy(tembuffer,whole_file+seq*MSGSIZE,len);
+                    printf("len of tembuffer %d\n", len);
+                    memset(msgbuffer,0,MSGSIZE+6);
+                    sprintf(msgbuffer,"%.6d",i+1);
+                    memcpy(msgbuffer+6,tembuffer,len);
+                    sendto(socket_transmission,msgbuffer,paquets[i].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
+                    printf("package %d send\n", seq);
                     gettimeofday(&start,NULL);
                     int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
 
@@ -392,6 +457,12 @@ int main(int argc,char* argv[]) {
             conter=0;
           }
         }
+        gettimeofday(&terminus_trans,NULL);
+        time_trans=1e6*(terminus_trans.tv_sec-commence_trans.tv_sec)+(terminus_trans.tv_usec-commence_trans.tv_usec);
+        printf("file_size*1000/time_trans %ld\n", file_size*1000/time_trans);
+        float debit=(float)(file_size*1000)/(float)time_trans;
+        printf("le debit est %f KB/s\n", debit);
+
         close(socket_transmission);
         ports_pool[port_servertcp-baseport]=1;
         printf("port used %d is now %d\n", port_servertcp, ports_pool[port_servertcp-baseport]);
