@@ -405,8 +405,11 @@ int main(int argc,char* argv[]) {
         }
         gettimeofday(&terminus_trans,NULL);
         time_trans=1e6*(terminus_trans.tv_sec-commence_trans.tv_sec)+(terminus_trans.tv_usec-commence_trans.tv_usec);
-        float debit=(float)(file_size*1000)/(float)time_trans;
-        printf("le debit est %f KB/s\n", debit);
+        float debit=(float)(file_size)/(float)time_trans;
+        printf("start at %lds %ldus, end at %lds %ldus\n", commence_trans.tv_sec,commence_trans.tv_usec,terminus_trans.tv_sec,terminus_trans.tv_usec);
+        printf("transmission last %ldus\n", time_trans);
+        printf("file size is %dB\n", file_size);
+        printf("le debit est %f MB/s\n", debit);
 
         close(socket_transmission);
         ports_pool[port_servertcp-baseport]=1;
