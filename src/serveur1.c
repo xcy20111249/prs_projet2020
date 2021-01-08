@@ -31,31 +31,36 @@ int protocole=0;
 int ports_pool[POOLSIZE];
 struct package_info
 {
-  struct timeval t_send, t_rcvd, RTT, SRTT, DevRTT, RTO;
+  struct timeval t_send, t_rcvd;
+  /*struct timeval RTT, SRTT, DevRTT, RTO;*/
   int pac_ack, pac_taille;
+};
+struct rto_info
+{
+  struct timeval RTT, SRTT, DevRTT, RTO;
 };
 char whole_file[1000000000];
 
-void calcul_package_RTO(struct package_info package_info) {/*cette fonction est vue de calculer le RTO*/
+void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de calculer le RTO*/
   /*initialiser les timers en format int */
   int srtt_us, rtt_us, devrtt_us, rto_us;
-  srtt_us=1e6*package_info.SRTT.tv_sec+package_info.SRTT.tv_usec;
-  rtt_us=1e6*package_info.RTT.tv_sec+package_info.RTT.tv_usec;
-  devrtt_us=1e6*package_info.DevRTT.tv_sec+package_info.DevRTT.tv_usec;
-  rto_us=1e6*package_info.RTO.tv_sec+package_info.RTO.tv_usec;
+  srtt_us=1e6*rto_info.SRTT.tv_sec+rto_info.SRTT.tv_usec;
+  rtt_us=1e6*rto_info.RTT.tv_sec+rto_info.RTT.tv_usec;
+  devrtt_us=1e6*rto_info.DevRTT.tv_sec+rto_info.DevRTT.tv_usec;
+  rto_us=1e6*rto_info.RTO.tv_sec+rto_info.RTO.tv_usec;
 
   /*calcul du rto*/
   srtt_us+=ALPHA*(rtt_us-srtt_us);
-  package_info.SRTT.tv_sec=srtt_us/1e6;
-  package_info.SRTT.tv_usec=srtt_us%(int)1e6;
-  printf("SRTT is %lds %ldus\n", package_info.SRTT.tv_sec,package_info.SRTT.tv_usec);
+  rto_info.SRTT.tv_sec=srtt_us/1e6;
+  rto_info.SRTT.tv_usec=srtt_us%(int)1e6;
+  printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
   devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
-  package_info.DevRTT.tv_sec = devrtt_us/1e6;
-  package_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
+  rto_info.DevRTT.tv_sec = devrtt_us/1e6;
+  rto_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
   rto_us=MU*srtt_us+DEE*devrtt_us;
-  package_info.RTO.tv_sec= rto_us/1e6;
-  package_info.RTO.tv_usec= rto_us%(int)1e6;
-  printf("RTO is %lds %ldus\n", package_info.RTO.tv_sec,package_info.RTO.tv_usec);
+  rto_info.RTO.tv_sec= rto_us/1e6;
+  rto_info.RTO.tv_usec= rto_us%(int)1e6;
+  printf("RTO is %lds %ldus\n", rto_info.RTO.tv_sec,rto_info.RTO.tv_usec);
 }
 
 int get_available_port(){/*find a port which is available for info transmission*/
@@ -127,6 +132,7 @@ int main(int argc,char* argv[]) {
     int goon=1;//control for msg transmission begin
     int con=1;//control of handshake done
     int socket_transmission;
+    int rtt_origin_us;
 
     while (con) {
       int cont=0;
@@ -187,10 +193,14 @@ int main(int argc,char* argv[]) {
         printf("Client port is %d\n", port_client_udp);
 
         while (1) {
+          struct timeval start, end;
           sendto(socket_frontdesk,ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
+          gettimeofday(&start,NULL);
           printf("tcp port info sent\n");
           memset(serverbuffer,0,RCVSIZE);
           recvfrom(socket_frontdesk,serverbuffer,RCVSIZE,0,(struct sockaddr*)&client_addr,&c_len);
+          gettimeofday(&end,NULL);
+          rtt_origin_us=(end.tv_sec-start.tv_sec)*1e6+(end.tv_usec-start.tv_usec);
           if (strcmp(serverbuffer,"ACK")==0) {
             printf("handshake done\n");
             con=0;
@@ -271,10 +281,14 @@ int main(int argc,char* argv[]) {
             for (int i = 0; i < pak_num; i++) {
               paquets[i].pac_ack=0;
             }
-            paquets[0].RTO.tv_sec=1;
-            paquets[0].RTO.tv_usec=500000;
-            paquets[0].SRTT.tv_usec=10000;
-            paquets[0].SRTT.tv_sec=0;
+            struct rto_info rto;
+            rto.DevRTT.tv_sec=(rtt_origin_us/2)/(int)1e6;
+            rto.DevRTT.tv_usec=(rtt_origin_us/2)%(int)1e6;
+            rto.SRTT.tv_usec=rtt_origin_us%(int)1e6;
+            rto.SRTT.tv_sec=rtt_origin_us/(int)1e6;
+            int rto_origin_us=MU*rtt_origin_us+DEE*rtt_origin_us;
+            rto.RTO.tv_sec=rto_origin_us/(int)1e6;
+            rto.RTO.tv_usec=rto_origin_us%(int)1e6;
 
             printf("transmission begin\n");
             fflush(stdout);
@@ -324,8 +338,8 @@ int main(int argc,char* argv[]) {
               fd_set readfds;
               FD_ZERO(&readfds);
               FD_SET(socket_transmission,&readfds);
-              timeout.tv_sec=paquets[last_seq_ack].RTO.tv_sec;
-              timeout.tv_usec=paquets[last_seq_ack].RTO.tv_usec;
+              timeout.tv_sec=rto.RTO.tv_sec;
+              timeout.tv_usec=rto.RTO.tv_usec;
               int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
 
               //waiting for ack
@@ -350,16 +364,16 @@ int main(int argc,char* argv[]) {
                   sendto(socket_transmission,msgbuffer,paquets[last_seq_ack].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
                   printf("package %d resend\n", last_seq_ack+1);
                   gettimeofday(&paquets[last_seq_ack].t_send,NULL);
-                  sleep(0.1);
+                  //sleep(0.1);
                 }
                 if (seqack>last_seq_ack) {
                   last_seq_ack=seqack;
                   gettimeofday(&paquets[seqack].t_rcvd,NULL);
                   total_us_calcul=1e6*(paquets[seqack].t_rcvd.tv_sec-paquets[seqack].t_send.tv_sec)+(paquets[seqack].t_rcvd.tv_usec-paquets[seqack].t_send.tv_usec);
-                  paquets[seqack].RTT.tv_sec=total_us_calcul/1e6;
-                  paquets[seqack].RTT.tv_usec=total_us_calcul-paquets[seqack].RTT.tv_sec;
-                  printf("RTT is %lds %ldus\n", paquets[seqack].RTT.tv_sec,paquets[seqack].RTT.tv_usec);
-                  calcul_package_RTO(paquets[seqack]);
+                  rto.RTT.tv_sec=total_us_calcul/1e6;
+                  rto.RTT.tv_usec=total_us_calcul%(int)1e6;
+                  printf("RTT is %lds %ldus\n", rto.RTT.tv_sec,rto.RTT.tv_usec);
+                  calcul_package_RTO(rto);
                 }
 
               }
@@ -373,7 +387,7 @@ int main(int argc,char* argv[]) {
                 sendto(socket_transmission,msgbuffer,paquets[last_seq_ack].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
                 printf("package %d resend\n", last_seq_ack+1);
                 gettimeofday(&paquets[last_seq_ack].t_send,NULL);
-                sleep(0.1);
+                //sleep(0.1);
               }
 
               //all pacakges transed and acked
@@ -382,7 +396,7 @@ int main(int argc,char* argv[]) {
               }
             }
 
-            sleep(1);
+            //sleep(1);
             sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
             printf("transmission done\n");
             fclose(fp);
