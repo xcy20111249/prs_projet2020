@@ -382,7 +382,11 @@ int main(int argc,char* argv[]) {
                 }
                 paquets[seqack].pac_ack+=1;
               }
-              if(resul==0){
+              if(resul==0){//timeout
+                int rto_calcul_us=1e6*rto.RTO.tv_sec+rto.RTO.tv_usec;
+                rto_calcul_us=1.005*rto_calcul_us;
+                rto.RTO.tv_sec=rto_calcul_us/(int)1e6;
+                rto.RTO.tv_usec=rto_calcul_us%(int)1e6;
                 //printf("timeout, retrans pacakge %d\n",last_seq_ack+1);
                 memset(tembuffer,0,MSGSIZE);
                 memcpy(tembuffer,whole_file+last_seq_ack*MSGSIZE,paquets[last_seq_ack].pac_taille-6);
@@ -414,7 +418,7 @@ int main(int argc,char* argv[]) {
         time_trans=1e6*(terminus_trans.tv_sec-commence_trans.tv_sec)+(terminus_trans.tv_usec-commence_trans.tv_usec);
         float debit=(float)(file_size)/(float)time_trans;
         printf("start at %lds %ldus, end at %lds %ldus\n", commence_trans.tv_sec,commence_trans.tv_usec,terminus_trans.tv_sec,terminus_trans.tv_usec);
-        printf("transmission last %ldus\n", time_trans);
+        printf("transmission last %fs\n", (float)time_trans/1e6);
         printf("file size is %dB\n", file_size);
         printf("tatal packages transed %d\n", pak_num);
         printf("le debit est %f MB/s\n", debit);
