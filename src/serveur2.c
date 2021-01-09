@@ -46,7 +46,7 @@ struct window_info
 };
 
 void calcul_cwnd(struct window_info cwnd){
-  if (!cwnd.congest) {//timeout
+  if (!cwnd.congest) {//no timeout
     if (cwnd.num_timeout<3 && cwnd.window_size<cwnd.ssthresh){//slow start
       for (int i = 0; i < cwnd.trans_round; i++) {
         cwnd.window_size=cwnd.window_size*2;
@@ -425,7 +425,7 @@ int main(int argc,char* argv[]) {
               }
               if(resul==0){//timeout
                 int rto_calcul_us=1e6*rto.RTO.tv_sec+rto.RTO.tv_usec;
-                rto_calcul_us=1.005*rto_calcul_us;
+                //rto_calcul_us=1.005*rto_calcul_us;
                 rto.RTO.tv_sec=rto_calcul_us/(int)1e6;
                 rto.RTO.tv_usec=rto_calcul_us%(int)1e6;
                 //printf("timeout, retrans pacakge %d\n",last_seq_ack+1);
