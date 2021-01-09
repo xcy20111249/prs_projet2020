@@ -52,7 +52,7 @@ void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de c
   srtt_us+=ALPHA*(rtt_us-srtt_us);
   rto_info.SRTT.tv_sec=srtt_us/1e6;
   rto_info.SRTT.tv_usec=srtt_us%(int)1e6;
-  printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
+  //printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
   devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   rto_info.DevRTT.tv_sec = devrtt_us/1e6;
   rto_info.DevRTT.tv_usec = devrtt_us%(int)1e6;

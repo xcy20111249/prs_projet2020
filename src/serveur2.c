@@ -29,6 +29,8 @@ int domaine=AF_INET;
 int type=SOCK_DGRAM;
 int protocole=0;
 int ports_pool[POOLSIZE];
+char whole_file[1000000000];
+
 struct package_info
 {
   struct timeval t_send, t_rcvd;
@@ -38,7 +40,41 @@ struct rto_info
 {
   struct timeval RTT, SRTT, DevRTT, RTO;
 };
-char whole_file[1000000000];
+struct window_info
+{
+  int window_size, ssthresh, num_timeout, trans_round, congest;
+};
+
+void calcul_cwnd(struct window_info cwnd){
+  if (!cwnd.congest) {//timeout
+    if (cwnd.num_timeout<3 && cwnd.window_size<cwnd.ssthresh){//slow start
+      for (int i = 0; i < cwnd.trans_round; i++) {
+        cwnd.window_size=cwnd.window_size*2;
+      }
+      if (cwnd.window_size>cwnd.ssthresh){
+        cwnd.window_size=cwnd.ssthresh;
+      }
+    }else{//congest avoid
+      cwnd.window_size=cwnd.window_size+cwnd.trans_round;
+    }
+  }else{//ack rcvd
+    cwnd.num_timeout+=1;
+    cwnd.ssthresh=cwnd.ssthresh/2;
+    if (cwnd.num_timeout<3){//slow start
+      cwnd.window_size=1;
+    }else{//fast recovery
+      cwnd.window_size=cwnd.ssthresh;
+    }
+  }
+}
+
+void init_cwnd(struct window_info cwnd){
+  cwnd.window_size=1;
+  cwnd.ssthresh=32;
+  cwnd.num_timeout=0;
+  cwnd.trans_round=0;
+  cwnd.congest=0;
+}
 
 void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de calculer le RTO*/
   /*initialiser les timers en format int */
@@ -52,7 +88,7 @@ void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de c
   srtt_us+=ALPHA*(rtt_us-srtt_us);
   rto_info.SRTT.tv_sec=srtt_us/1e6;
   rto_info.SRTT.tv_usec=srtt_us%(int)1e6;
-  printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
+  //printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
   devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   rto_info.DevRTT.tv_sec = devrtt_us/1e6;
   rto_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
@@ -231,14 +267,14 @@ int main(int argc,char* argv[]) {
         int file_size;
         int pak_num;
 
-
         if (goon) {//begin communication
           FILE *fp;
           char ackbuffer[ACKSIZE];//ack msg
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
-          int cwnd=50;
+          struct window_info cwnd;
+          init_cwnd(cwnd);
           fd_set readfds;
           FD_ZERO(&readfds);
           struct timeval timeout;
@@ -282,6 +318,8 @@ int main(int argc,char* argv[]) {
               paquets[i].pac_ack=0;
             }
             struct rto_info rto;
+
+            //initial rto with rtt of syn
             rto.DevRTT.tv_sec=(rtt_origin_us/2)/(int)1e6;
             rto.DevRTT.tv_usec=(rtt_origin_us/2)%(int)1e6;
             rto.SRTT.tv_usec=rtt_origin_us%(int)1e6;
@@ -314,7 +352,7 @@ int main(int argc,char* argv[]) {
 
             while (!file_end) {
               char msgbuffer[MSGSIZE+6];
-              end_window=last_seq_ack+cwnd;
+              end_window=last_seq_ack+cwnd.window_size;
               if (end_window>=pak_num) {
                 end_window=pak_num;
                 //printf("almost done, pak_num %d\n", pak_num);
@@ -368,6 +406,8 @@ int main(int argc,char* argv[]) {
                   //sleep(0.1);
                 }
                 if (seqack>last_seq_ack) {
+                  cwnd.trans_round=seqack-last_seq_ack;
+                  cwnd.congest=0;
                   last_seq_ack=seqack;
 
                   //when it's first ack of pak, calcul RTO
@@ -379,6 +419,7 @@ int main(int argc,char* argv[]) {
                     printf("RTT is %lds %ldus\n", rto.RTT.tv_sec,rto.RTT.tv_usec);
                     calcul_package_RTO(rto);
                   }
+                  calcul_cwnd(cwnd);
                 }
                 paquets[seqack].pac_ack+=1;
               }
@@ -397,6 +438,10 @@ int main(int argc,char* argv[]) {
                 //printf("package %d resend\n", last_seq_ack+1);
                 gettimeofday(&paquets[last_seq_ack].t_send,NULL);
                 //sleep(0.1);
+
+                cwnd.num_timeout+=1;
+                cwnd.congest=1;
+                calcul_cwnd(cwnd);
               }
 
               //all pacakges transed and acked
