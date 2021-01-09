@@ -29,8 +29,6 @@ int domaine=AF_INET;
 int type=SOCK_DGRAM;
 int protocole=0;
 int ports_pool[POOLSIZE];
-char whole_file[1000000000];
-
 struct package_info
 {
   struct timeval t_send, t_rcvd;
@@ -44,29 +42,6 @@ struct window_info
 {
   int window_size, ssthresh, num_timeout, trans_round, congest;
 };
-
-void calcul_cwnd(struct window_info cwnd){
-  if (!cwnd.congest) {//no timeout
-    if (cwnd.num_timeout<3 && cwnd.window_size<cwnd.ssthresh){//slow start
-      for (int i = 0; i < cwnd.trans_round; i++) {
-        cwnd.window_size=cwnd.window_size*2;
-      }
-      if (cwnd.window_size>cwnd.ssthresh){
-        cwnd.window_size=cwnd.ssthresh;
-      }
-    }else{//congest avoid
-      cwnd.window_size=cwnd.window_size+cwnd.trans_round;
-    }
-  }else{//ack rcvd
-    cwnd.num_timeout+=1;
-    cwnd.ssthresh=cwnd.ssthresh/2;
-    if (cwnd.num_timeout<3){//slow start
-      cwnd.window_size=1;
-    }else{//fast recovery
-      cwnd.window_size=cwnd.ssthresh;
-    }
-  }
-}
 
 void init_cwnd(struct window_info cwnd){
   cwnd.window_size=1;
@@ -88,7 +63,7 @@ void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de c
   srtt_us+=ALPHA*(rtt_us-srtt_us);
   rto_info.SRTT.tv_sec=srtt_us/1e6;
   rto_info.SRTT.tv_usec=srtt_us%(int)1e6;
-  //printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
+  printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
   devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   rto_info.DevRTT.tv_sec = devrtt_us/1e6;
   rto_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
@@ -96,22 +71,6 @@ void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de c
   rto_info.RTO.tv_sec= rto_us/1e6;
   rto_info.RTO.tv_usec= rto_us%(int)1e6;
   printf("RTO is %lds %ldus\n", rto_info.RTO.tv_sec,rto_info.RTO.tv_usec);
-}
-
-int get_available_port(){/*find a port which is available for info transmission*/
-  int port;
-  for(int i=0; i<POOLSIZE; i++){
-    if (ports_pool[i]) {
-      printf("%d\n", i);
-      ports_pool[i]=0;
-      port=i+baseport;
-      printf("%d\n", port);
-      return port;
-    }
-  }
-  printf("no port available, plz wait\n");
-  sleep(5);
-  return get_available_port();
 }
 
 int main(int argc,char* argv[]) {
@@ -227,7 +186,7 @@ int main(int argc,char* argv[]) {
         printf("Client IP is %s\n", ip_client_udp);
         printf("Client port is %d\n", port_client_udp);
 
-        while (1) {
+        while (1) {//send port info, end handshake
           struct timeval start, end;
           sendto(socket_frontdesk,ackport,ACKPORT,0,(struct sockaddr*)&client_addr,c_len);
           gettimeofday(&start,NULL);
@@ -267,18 +226,20 @@ int main(int argc,char* argv[]) {
         int file_size;
         int pak_num;
 
+
         if (goon) {//begin communication
           FILE *fp;
           char ackbuffer[ACKSIZE];//ack msg
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
-          struct window_info cwnd;
-          init_cwnd(cwnd);
+          //int cwnd=50;
           fd_set readfds;
           FD_ZERO(&readfds);
           struct timeval timeout;
           long total_us_calcul;
+          struct window_info cwnd;
+          init_cwnd(cwnd);
 
           printf("go on\n");
 
@@ -318,8 +279,6 @@ int main(int argc,char* argv[]) {
               paquets[i].pac_ack=0;
             }
             struct rto_info rto;
-
-            //initial rto with rtt of syn
             rto.DevRTT.tv_sec=(rtt_origin_us/2)/(int)1e6;
             rto.DevRTT.tv_usec=(rtt_origin_us/2)%(int)1e6;
             rto.SRTT.tv_usec=rtt_origin_us%(int)1e6;
@@ -330,9 +289,6 @@ int main(int argc,char* argv[]) {
 
             printf("transmission begin\n");
             fflush(stdout);
-
-            memset(whole_file,0,sizeof(whole_file));
-            fread (whole_file,1,file_size,fp);
 
             //prepare all packages for transmission
             for (int i = 0; i < pak_num; i++) {
@@ -351,6 +307,7 @@ int main(int argc,char* argv[]) {
             int end_window;
 
             while (!file_end) {
+              printf("cwnd is now %d\n", cwnd.window_size);
               char msgbuffer[MSGSIZE+6];
               end_window=last_seq_ack+cwnd.window_size;
               if (end_window>=pak_num) {
@@ -362,8 +319,10 @@ int main(int argc,char* argv[]) {
 
               //send all packages in slide window
               for (int i = last_seq_env; i < end_window; i++) {
+                int offset=i*MSGSIZE;
                 memset(tembuffer,0,MSGSIZE);
-                memcpy(tembuffer,whole_file+i*MSGSIZE,paquets[i].pac_taille-6);
+                fseek(fp, offset, SEEK_SET);
+                fread (tembuffer,1,MSGSIZE,fp);
                 memset(msgbuffer,0,MSGSIZE+6);
                 sprintf(msgbuffer,"%.6d",i+1);
                 memcpy(msgbuffer+6,tembuffer,paquets[i].pac_taille-6);
@@ -392,11 +351,14 @@ int main(int argc,char* argv[]) {
                 memset(sequence,0,6);
                 memcpy(sequence,ackbuffer+3,6);
                 seqack=atoi(sequence);
-                if (seqack==last_seq_ack && paquets[seqack].pac_ack>2) {
+                if (seqack==last_seq_ack && paquets[seqack].pac_ack>3) {//fast retrans
+                  paquets[seqack].pac_ack=0;
                   //printf("last pak ack is %d\n", last_seq_ack);
                   //printf("last pak multi ack, pak lose, retrans pak %d\n",last_seq_ack+1);
                   memset(tembuffer,0,MSGSIZE);
-                  memcpy(tembuffer,whole_file+last_seq_ack*MSGSIZE,paquets[last_seq_ack].pac_taille-6);
+                  int offset=last_seq_ack*MSGSIZE;
+                  fseek(fp, offset, SEEK_SET);
+                  fread (tembuffer,1,MSGSIZE,fp);
                   memset(msgbuffer,0,MSGSIZE+6);
                   sprintf(msgbuffer,"%.6d",last_seq_ack+1);
                   memcpy(msgbuffer+6,tembuffer,paquets[last_seq_ack].pac_taille-6);
@@ -406,8 +368,6 @@ int main(int argc,char* argv[]) {
                   //sleep(0.1);
                 }
                 if (seqack>last_seq_ack) {
-                  cwnd.trans_round=seqack-last_seq_ack;
-                  cwnd.congest=0;
                   last_seq_ack=seqack;
 
                   //when it's first ack of pak, calcul RTO
@@ -419,18 +379,20 @@ int main(int argc,char* argv[]) {
                     printf("RTT is %lds %ldus\n", rto.RTT.tv_sec,rto.RTT.tv_usec);
                     calcul_package_RTO(rto);
                   }
-                  calcul_cwnd(cwnd);
                 }
                 paquets[seqack].pac_ack+=1;
+                cwnd.window_size=cwnd.window_size*2;
               }
               if(resul==0){//timeout
                 int rto_calcul_us=1e6*rto.RTO.tv_sec+rto.RTO.tv_usec;
-                //rto_calcul_us=1.005*rto_calcul_us;
+                rto_calcul_us=1.005*rto_calcul_us;
                 rto.RTO.tv_sec=rto_calcul_us/(int)1e6;
                 rto.RTO.tv_usec=rto_calcul_us%(int)1e6;
                 //printf("timeout, retrans pacakge %d\n",last_seq_ack+1);
                 memset(tembuffer,0,MSGSIZE);
-                memcpy(tembuffer,whole_file+last_seq_ack*MSGSIZE,paquets[last_seq_ack].pac_taille-6);
+                int offset=last_seq_ack*MSGSIZE;
+                fseek(fp, offset, SEEK_SET);
+                fread (tembuffer,1,MSGSIZE,fp);
                 memset(msgbuffer,0,MSGSIZE+6);
                 sprintf(msgbuffer,"%.6d",last_seq_ack+1);
                 memcpy(msgbuffer+6,tembuffer,paquets[last_seq_ack].pac_taille-6);
@@ -439,9 +401,7 @@ int main(int argc,char* argv[]) {
                 gettimeofday(&paquets[last_seq_ack].t_send,NULL);
                 //sleep(0.1);
 
-                cwnd.num_timeout+=1;
-                cwnd.congest=1;
-                calcul_cwnd(cwnd);
+                cwnd.window_size=1;
               }
 
               //all pacakges transed and acked

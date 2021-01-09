@@ -51,31 +51,15 @@ void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de c
   srtt_us+=ALPHA*(rtt_us-srtt_us);
   rto_info.SRTT.tv_sec=srtt_us/1e6;
   rto_info.SRTT.tv_usec=srtt_us%(int)1e6;
-  printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
+  //printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
   devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   rto_info.DevRTT.tv_sec = devrtt_us/1e6;
   rto_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
   rto_us=MU*srtt_us+DEE*devrtt_us;
   rto_info.RTO.tv_sec= rto_us/1e6;
   rto_info.RTO.tv_usec= rto_us%(int)1e6;
-  printf("RTO is %lds %ldus\n", rto_info.RTO.tv_sec,rto_info.RTO.tv_usec);
+  //printf("RTO is %lds %ldus\n", rto_info.RTO.tv_sec,rto_info.RTO.tv_usec);
 }
-
-/*int get_available_port(){//find a port which is available for info transmission
-  int port;
-  for(int i=0; i<POOLSIZE; i++){
-    if (ports_pool[i]) {
-      printf("%d\n", i);
-      ports_pool[i]=0;
-      port=i+baseport;
-      printf("%d\n", port);
-      return port;
-    }
-  }
-  printf("no port available, plz wait\n");
-  sleep(5);
-  return get_available_port();
-}*/
 
 int main(int argc,char* argv[]) {
   if (argc<2) {
@@ -237,7 +221,7 @@ int main(int argc,char* argv[]) {
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
-          int cwnd=50;
+          int cwnd=70;
           fd_set readfds;
           FD_ZERO(&readfds);
           struct timeval timeout;
@@ -377,7 +361,7 @@ int main(int argc,char* argv[]) {
                     total_us_calcul=1e6*(paquets[seqack].t_rcvd.tv_sec-paquets[seqack].t_send.tv_sec)+(paquets[seqack].t_rcvd.tv_usec-paquets[seqack].t_send.tv_usec);
                     rto.RTT.tv_sec=total_us_calcul/1e6;
                     rto.RTT.tv_usec=total_us_calcul%(int)1e6;
-                    printf("RTT is %lds %ldus\n", rto.RTT.tv_sec,rto.RTT.tv_usec);
+                    //printf("RTT is %lds %ldus\n", rto.RTT.tv_sec,rto.RTT.tv_usec);
                     calcul_package_RTO(rto);
                   }
                 }
