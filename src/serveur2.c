@@ -14,7 +14,7 @@
 
 #define RCVSIZE 20
 #define ACKPORT 12
-#define MSGSIZE 1024
+#define MSGSIZE 1400
 #define SEQSIZE 6
 #define ACKSIZE 20
 #define ALPHA 0.125
