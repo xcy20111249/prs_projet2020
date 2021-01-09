@@ -352,7 +352,8 @@ int main(int argc,char* argv[]) {
                 memset(sequence,0,6);
                 memcpy(sequence,ackbuffer+3,6);
                 seqack=atoi(sequence);
-                if (seqack==last_seq_ack && paquets[seqack].pac_ack>2) {
+                if (seqack==last_seq_ack && paquets[seqack].pac_ack>3) {//fast retrans
+                  paquets[seqack].pac_ack=0;
                   //printf("last pak ack is %d\n", last_seq_ack);
                   //printf("last pak multi ack, pak lose, retrans pak %d\n",last_seq_ack+1);
                   memset(tembuffer,0,MSGSIZE);
