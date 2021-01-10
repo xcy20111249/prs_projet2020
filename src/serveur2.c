@@ -32,7 +32,7 @@ int ports_pool[POOLSIZE];
 struct package_info
 {
   struct timeval t_send, t_rcvd;
-  int pac_ack, pac_taille;
+  int pac_ack, pac_taille, pac_send, pac_retrans;
 };
 struct rto_info
 {
@@ -44,11 +44,34 @@ struct window_info
 };
 
 void init_cwnd(struct window_info cwnd){
-  cwnd.window_size=1;
+  cwnd.window_size=32;
   cwnd.ssthresh=32;
   cwnd.num_timeout=0;
   cwnd.trans_round=0;
   cwnd.congest=0;
+}
+
+void calcul_cwnd(struct window_info cwnd){
+  if (!cwnd.congest) {//no timeout
+    if (cwnd.num_timeout<3 && cwnd.window_size<cwnd.ssthresh){//slow start
+      for (int i = 0; i < cwnd.trans_round; i++) {
+        cwnd.window_size=cwnd.window_size*2;
+      }
+      if (cwnd.window_size>cwnd.ssthresh){
+        cwnd.window_size=cwnd.ssthresh;
+      }
+    }else{//congest avoid
+      cwnd.window_size=cwnd.window_size+cwnd.trans_round;
+    }
+  }else{//ack rcvd
+    cwnd.num_timeout+=1;
+    cwnd.ssthresh=cwnd.ssthresh/2;
+    if (cwnd.num_timeout<3){//slow start
+      cwnd.window_size=1;
+    }else{//fast recovery
+      cwnd.window_size=cwnd.ssthresh;
+    }
+  }
 }
 
 void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de calculer le RTO*/
@@ -60,17 +83,17 @@ void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de c
   rto_us=1e6*rto_info.RTO.tv_sec+rto_info.RTO.tv_usec;
 
   /*calcul du rto*/
+  devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   srtt_us+=ALPHA*(rtt_us-srtt_us);
+  rto_us=MU*srtt_us+DEE*devrtt_us;
   rto_info.SRTT.tv_sec=srtt_us/1e6;
   rto_info.SRTT.tv_usec=srtt_us%(int)1e6;
-  printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
-  devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
+  //printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
   rto_info.DevRTT.tv_sec = devrtt_us/1e6;
   rto_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
-  rto_us=MU*srtt_us+DEE*devrtt_us;
   rto_info.RTO.tv_sec= rto_us/1e6;
   rto_info.RTO.tv_usec= rto_us%(int)1e6;
-  printf("RTO is %lds %ldus\n", rto_info.RTO.tv_sec,rto_info.RTO.tv_usec);
+  //printf("RTO is %lds %ldus\n", rto_info.RTO.tv_sec,rto_info.RTO.tv_usec);
 }
 
 int main(int argc,char* argv[]) {
@@ -233,10 +256,16 @@ int main(int argc,char* argv[]) {
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
-          //int cwnd=50;
+
+          int cwnd_size=10;
+          int cwnd_ssthresh=40;
+          int cwnd_num_timeout=0;
+          int cwnd_trans_round=0;
+          int cwnd_congest=0;
+
           fd_set readfds;
           FD_ZERO(&readfds);
-          struct timeval timeout;
+          struct timeval timeout, time_interne;
           long total_us_calcul;
           struct window_info cwnd;
           init_cwnd(cwnd);
@@ -277,6 +306,8 @@ int main(int argc,char* argv[]) {
             struct package_info paquets[pak_num];
             for (int i = 0; i < pak_num; i++) {
               paquets[i].pac_ack=0;
+              paquets[i].pac_send=0;
+              paquets[i].pac_retrans=0;
             }
             struct rto_info rto;
             rto.DevRTT.tv_sec=(rtt_origin_us/2)/(int)1e6;
@@ -307,9 +338,9 @@ int main(int argc,char* argv[]) {
             int end_window;
 
             while (!file_end) {
-              printf("cwnd is now %d\n", cwnd.window_size);
+              //printf("cwnd is now %d\n", cwnd_size);
               char msgbuffer[MSGSIZE+6];
-              end_window=last_seq_ack+cwnd.window_size;
+              end_window=last_seq_ack+cwnd_size;
               if (end_window>=pak_num) {
                 end_window=pak_num;
                 //printf("almost done, pak_num %d\n", pak_num);
@@ -318,18 +349,22 @@ int main(int argc,char* argv[]) {
               //printf("end window %d\n", end_window);
 
               //send all packages in slide window
-              for (int i = last_seq_env; i < end_window; i++) {
-                int offset=i*MSGSIZE;
-                memset(tembuffer,0,MSGSIZE);
-                fseek(fp, offset, SEEK_SET);
-                fread (tembuffer,1,MSGSIZE,fp);
-                memset(msgbuffer,0,MSGSIZE+6);
-                sprintf(msgbuffer,"%.6d",i+1);
-                memcpy(msgbuffer+6,tembuffer,paquets[i].pac_taille-6);
-                sendto(socket_transmission,msgbuffer,paquets[i].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
-                //printf("package %d send\n", i+1);
-                gettimeofday(&paquets[i].t_send,NULL);
-                last_seq_env=i+1;
+              for (int i = last_seq_ack; i < end_window; i++) {
+                if (!paquets[i].pac_send) {
+                  int offset=i*MSGSIZE;
+                  memset(tembuffer,0,MSGSIZE);
+                  fseek(fp, offset, SEEK_SET);
+                  fread (tembuffer,1,MSGSIZE,fp);
+                  memset(msgbuffer,0,MSGSIZE+6);
+                  sprintf(msgbuffer,"%.6d",i+1);
+                  memcpy(msgbuffer+6,tembuffer,paquets[i].pac_taille-6);
+                  sendto(socket_transmission,msgbuffer,paquets[i].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
+                  //printf("package %d send\n", i+1);
+                  gettimeofday(&time_interne,NULL);
+                  paquets[i].t_send.tv_sec=time_interne.tv_sec;
+                  paquets[i].t_send.tv_usec=time_interne.tv_usec;
+                  last_seq_env=i+1;
+                }
               }
 
               fd_set readfds;
@@ -337,6 +372,9 @@ int main(int argc,char* argv[]) {
               FD_SET(socket_transmission,&readfds);
               timeout.tv_sec=rto.RTO.tv_sec;
               timeout.tv_usec=rto.RTO.tv_usec;
+              //timeout.tv_sec=0;
+              //timeout.tv_usec=50000;
+
               //printf("timeout is %lds %ldus\n", timeout.tv_sec, timeout.tv_usec);
               int resul=select(socket_transmission+1,&readfds,NULL,NULL,&timeout);
 
@@ -364,28 +402,43 @@ int main(int argc,char* argv[]) {
                   memcpy(msgbuffer+6,tembuffer,paquets[last_seq_ack].pac_taille-6);
                   sendto(socket_transmission,msgbuffer,paquets[last_seq_ack].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
                   //printf("package %d resend\n", last_seq_ack+1);
-                  gettimeofday(&paquets[last_seq_ack].t_send,NULL);
+                  gettimeofday(&time_interne,NULL);
+                  paquets[last_seq_ack].t_send.tv_sec=time_interne.tv_sec;
+                  paquets[last_seq_ack].t_send.tv_usec=time_interne.tv_usec;
+                  paquets[last_seq_ack].pac_retrans=1;
+
                   //sleep(0.1);
                 }
                 if (seqack>last_seq_ack) {
+                  cwnd.trans_round=seqack-last_seq_ack;
+                  cwnd_trans_round=seqack-last_seq_ack;
                   last_seq_ack=seqack;
 
                   //when it's first ack of pak, calcul RTO
-                  if (paquets[seqack].pac_ack==0){
-                    gettimeofday(&paquets[seqack].t_rcvd,NULL);
+                  if (paquets[seqack].pac_ack==0 || !paquets[seqack].pac_retrans){
+                    gettimeofday(&time_interne,NULL);
+                    paquets[last_seq_ack].t_rcvd.tv_sec=time_interne.tv_sec;
+                    paquets[last_seq_ack].t_rcvd.tv_usec=time_interne.tv_usec;
                     total_us_calcul=1e6*(paquets[seqack].t_rcvd.tv_sec-paquets[seqack].t_send.tv_sec)+(paquets[seqack].t_rcvd.tv_usec-paquets[seqack].t_send.tv_usec);
                     rto.RTT.tv_sec=total_us_calcul/1e6;
                     rto.RTT.tv_usec=total_us_calcul%(int)1e6;
-                    printf("RTT is %lds %ldus\n", rto.RTT.tv_sec,rto.RTT.tv_usec);
+                    //printf("RTT is %lds %ldus\n", rto.RTT.tv_sec,rto.RTT.tv_usec);
                     calcul_package_RTO(rto);
                   }
+                  if (cwnd_size<cwnd_ssthresh) {
+                    cwnd_size*=2;
+                    printf("cwnd is now %d\n", cwnd_size);
+                  }else if (cwnd_size<70){
+                    cwnd_size+=1;
+                    printf("cwnd is now %d\n", cwnd_size);
+                  }
+
                 }
                 paquets[seqack].pac_ack+=1;
-                cwnd.window_size=cwnd.window_size*2;
               }
               if(resul==0){//timeout
                 int rto_calcul_us=1e6*rto.RTO.tv_sec+rto.RTO.tv_usec;
-                rto_calcul_us=1.005*rto_calcul_us;
+                rto_calcul_us=1.01*rto_calcul_us;
                 rto.RTO.tv_sec=rto_calcul_us/(int)1e6;
                 rto.RTO.tv_usec=rto_calcul_us%(int)1e6;
                 //printf("timeout, retrans pacakge %d\n",last_seq_ack+1);
@@ -398,10 +451,13 @@ int main(int argc,char* argv[]) {
                 memcpy(msgbuffer+6,tembuffer,paquets[last_seq_ack].pac_taille-6);
                 sendto(socket_transmission,msgbuffer,paquets[last_seq_ack].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
                 //printf("package %d resend\n", last_seq_ack+1);
-                gettimeofday(&paquets[last_seq_ack].t_send,NULL);
+                gettimeofday(&time_interne,NULL);
+                paquets[last_seq_ack].t_send.tv_sec=time_interne.tv_sec;
+                paquets[last_seq_ack].t_send.tv_usec=time_interne.tv_usec;
                 //sleep(0.1);
 
-                cwnd.window_size=1;
+                cwnd_size=10;
+                printf("cwnd is now %d\n", cwnd_size);
               }
 
               //all pacakges transed and acked
@@ -410,8 +466,8 @@ int main(int argc,char* argv[]) {
               }
             }
 
-            //sleep(0.5);
-            for (int i = 0; i < 5; i++) {
+            sleep(1);
+            for (int i = 0; i < 10; i++) {
               sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
             }
             printf("transmission done\n");
