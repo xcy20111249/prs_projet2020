@@ -48,18 +48,20 @@ void calcul_package_RTO(struct rto_info rto_info) {/*cette fonction est vue de c
   rto_us=1e6*rto_info.RTO.tv_sec+rto_info.RTO.tv_usec;
 
   /*calcul du rto*/
+  devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   srtt_us+=ALPHA*(rtt_us-srtt_us);
+  rto_us=MU*srtt_us+DEE*devrtt_us;
   rto_info.SRTT.tv_sec=srtt_us/1e6;
   rto_info.SRTT.tv_usec=srtt_us%(int)1e6;
   //printf("SRTT is %lds %ldus\n", rto_info.SRTT.tv_sec,rto_info.SRTT.tv_usec);
-  devrtt_us=(1-BETA)*devrtt_us+BETA*abs(rtt_us-srtt_us);
   rto_info.DevRTT.tv_sec = devrtt_us/1e6;
   rto_info.DevRTT.tv_usec = devrtt_us%(int)1e6;
-  rto_us=MU*srtt_us+DEE*devrtt_us;
   rto_info.RTO.tv_sec= rto_us/1e6;
   rto_info.RTO.tv_usec= rto_us%(int)1e6;
   //printf("RTO is %lds %ldus\n", rto_info.RTO.tv_sec,rto_info.RTO.tv_usec);
 }
+
+struct package_info paquets[1000000];
 
 int main(int argc,char* argv[]) {
   if (argc<2) {
@@ -258,12 +260,14 @@ int main(int argc,char* argv[]) {
             if (file_size%MSGSIZE!=0){
               pak_num+=1;
             }
+            printf("pak_num %d\n", pak_num);
             //printf("total package number is %d\n", pak_num);
 
-            struct package_info paquets[pak_num];
+            //struct package_info paquets[pak_num];
             for (int i = 0; i < pak_num; i++) {
               paquets[i].pac_ack=0;
             }
+            printf("pak initial\n");
             struct rto_info rto;
             rto.DevRTT.tv_sec=(rtt_origin_us/2)/(int)1e6;
             rto.DevRTT.tv_usec=(rtt_origin_us/2)%(int)1e6;
@@ -369,7 +373,7 @@ int main(int argc,char* argv[]) {
               }
               if(resul==0){//timeout
                 int rto_calcul_us=1e6*rto.RTO.tv_sec+rto.RTO.tv_usec;
-                rto_calcul_us=1.005*rto_calcul_us;
+                rto_calcul_us=1.01*rto_calcul_us;
                 rto.RTO.tv_sec=rto_calcul_us/(int)1e6;
                 rto.RTO.tv_usec=rto_calcul_us%(int)1e6;
                 //printf("timeout, retrans pacakge %d\n",last_seq_ack+1);
