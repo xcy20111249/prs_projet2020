@@ -248,7 +248,8 @@ int main(int argc,char* argv[]) {
         long time_trans;
         int file_size;
         int pak_num;
-
+        int cwnd_counter=0;
+        int cwnd_round=0;
 
         if (goon) {//begin communication
           FILE *fp;
@@ -258,10 +259,8 @@ int main(int argc,char* argv[]) {
           int len;
 
           int cwnd_size=10;
-          int cwnd_ssthresh=40;
+          int cwnd_ssthresh=20;
           int cwnd_num_timeout=0;
-          int cwnd_trans_round=0;
-          int cwnd_congest=0;
 
           fd_set readfds;
           FD_ZERO(&readfds);
@@ -350,22 +349,24 @@ int main(int argc,char* argv[]) {
 
               //send all packages in slide window
               for (int i = last_seq_ack; i < end_window; i++) {
-                if (!paquets[i].pac_send) {
-                  int offset=i*MSGSIZE;
-                  memset(tembuffer,0,MSGSIZE);
-                  fseek(fp, offset, SEEK_SET);
-                  fread (tembuffer,1,MSGSIZE,fp);
-                  memset(msgbuffer,0,MSGSIZE+6);
-                  sprintf(msgbuffer,"%.6d",i+1);
-                  memcpy(msgbuffer+6,tembuffer,paquets[i].pac_taille-6);
-                  sendto(socket_transmission,msgbuffer,paquets[i].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
-                  //printf("package %d send\n", i+1);
-                  gettimeofday(&time_interne,NULL);
-                  paquets[i].t_send.tv_sec=time_interne.tv_sec;
-                  paquets[i].t_send.tv_usec=time_interne.tv_usec;
-                  last_seq_env=i+1;
-                }
+                int offset=i*MSGSIZE;
+                memset(tembuffer,0,MSGSIZE);
+                fseek(fp, offset, SEEK_SET);
+                fread (tembuffer,1,MSGSIZE,fp);
+                memset(msgbuffer,0,MSGSIZE+6);
+                sprintf(msgbuffer,"%.6d",i+1);
+                memcpy(msgbuffer+6,tembuffer,paquets[i].pac_taille-6);
+                sendto(socket_transmission,msgbuffer,paquets[i].pac_taille,0,(struct sockaddr*)&client_addr,c_len);
+                //printf("package %d send\n", i+1);
+                gettimeofday(&time_interne,NULL);
+                paquets[i].t_send.tv_sec=time_interne.tv_sec;
+                paquets[i].t_send.tv_usec=time_interne.tv_usec;
+                last_seq_env=i+1;
+                paquets[i].pac_send+=1;
               }
+
+              cwnd_counter+=cwnd_size;
+              cwnd_round+=1;
 
               fd_set readfds;
               FD_ZERO(&readfds);
@@ -389,6 +390,12 @@ int main(int argc,char* argv[]) {
                 memset(sequence,0,6);
                 memcpy(sequence,ackbuffer+3,6);
                 seqack=atoi(sequence);
+
+                if (seqack==pak_num) {//whole file rcvd
+                  printf("whole file ack\n");
+                  break;
+                }
+
                 if (seqack==last_seq_ack && paquets[seqack].pac_ack>3) {//fast retrans
                   paquets[seqack].pac_ack=0;
                   //printf("last pak ack is %d\n", last_seq_ack);
@@ -411,7 +418,6 @@ int main(int argc,char* argv[]) {
                 }
                 if (seqack>last_seq_ack) {
                   cwnd.trans_round=seqack-last_seq_ack;
-                  cwnd_trans_round=seqack-last_seq_ack;
                   last_seq_ack=seqack;
 
                   //when it's first ack of pak, calcul RTO
@@ -427,11 +433,13 @@ int main(int argc,char* argv[]) {
                   }
                   if (cwnd_size<cwnd_ssthresh) {
                     cwnd_size*=2;
-                    printf("cwnd is now %d\n", cwnd_size);
-                  }else if (cwnd_size<70){
+                    //printf("cwnd is now %d\n", cwnd_size);
+                  }else if (cwnd_size<40){
                     cwnd_size+=1;
-                    printf("cwnd is now %d\n", cwnd_size);
+                    //printf("cwnd is now %d\n", cwnd_size);
                   }
+                  cwnd.congest=0;
+                  calcul_cwnd(cwnd);
 
                 }
                 paquets[seqack].pac_ack+=1;
@@ -456,18 +464,24 @@ int main(int argc,char* argv[]) {
                 paquets[last_seq_ack].t_send.tv_usec=time_interne.tv_usec;
                 //sleep(0.1);
 
-                cwnd_size=10;
-                printf("cwnd is now %d\n", cwnd_size);
+                cwnd_num_timeout+=1;
+                cwnd_ssthresh=cwnd_size/2;
+                if (cwnd_num_timeout<3) {
+                  cwnd_size=10;
+                }else{
+                  cwnd_size=cwnd_ssthresh;
+                }
+                //printf("cwnd is now %d\n", cwnd_size);
+
+                cwnd.congest=1;
+                cwnd.num_timeout+=1;
+                calcul_cwnd(cwnd);
               }
 
-              //all pacakges transed and acked
-              if (last_seq_ack==pak_num) {
-                file_end=1;
-              }
             }
 
-            sleep(1);
-            for (int i = 0; i < 10; i++) {
+            //sleep(1);
+            for (int i = 0; i < 1000; i++) {
               sendto(socket_transmission,"FIN",3,0,(struct sockaddr*)&client_addr,c_len);
             }
             printf("transmission done\n");
@@ -478,16 +492,17 @@ int main(int argc,char* argv[]) {
         gettimeofday(&terminus_trans,NULL);
         time_trans=1e6*(terminus_trans.tv_sec-commence_trans.tv_sec)+(terminus_trans.tv_usec-commence_trans.tv_usec);
         float debit=(float)(file_size)/(float)time_trans;
-        printf("start at %lds %ldus, end at %lds %ldus\n", commence_trans.tv_sec,commence_trans.tv_usec,terminus_trans.tv_sec,terminus_trans.tv_usec);
+        //printf("start at %lds %ldus, end at %lds %ldus\n", commence_trans.tv_sec,commence_trans.tv_usec,terminus_trans.tv_sec,terminus_trans.tv_usec);
         printf("transmission last %fs\n", (float)time_trans/1e6);
         printf("file size is %dB\n", file_size);
         printf("tatal packages transed %d\n", pak_num);
         printf("le debit est %f MB/s\n", debit);
+        printf("cwnd au moyen %d\n", cwnd_counter/cwnd_round);
 
         close(socket_transmission);
         ports_pool[port_servertcp-baseport]=1;
-        printf("port used %d is now %d\n", port_servertcp, ports_pool[port_servertcp-baseport]);
-        printf("port %d closed\n", port_servertcp);
+        //printf("port used %d is now %d\n", port_servertcp, ports_pool[port_servertcp-baseport]);
+        //printf("port %d closed\n", port_servertcp);
         exit(1);
       }
 

@@ -223,7 +223,7 @@ int main(int argc,char* argv[]) {
           char tembuffer[MSGSIZE];//data of the pic
           char fname[RCVSIZE];
           int len;
-          int cwnd=70;
+          int cwnd=40;
           fd_set readfds;
           FD_ZERO(&readfds);
           struct timeval timeout;
@@ -340,6 +340,11 @@ int main(int argc,char* argv[]) {
                 memset(sequence,0,6);
                 memcpy(sequence,ackbuffer+3,6);
                 seqack=atoi(sequence);
+
+                if (seqack==pak_num) {
+                  break;
+                }
+
                 if (seqack==last_seq_ack && paquets[seqack].pac_ack>3) {//fast retrans
                   paquets[seqack].pac_ack=0;
                   //printf("last pak ack is %d\n", last_seq_ack);
@@ -391,9 +396,9 @@ int main(int argc,char* argv[]) {
               }
 
               //all pacakges transed and acked
-              if (last_seq_ack==pak_num) {
+              /*if (last_seq_ack==pak_num) {
                 file_end=1;
-              }
+              }*/
             }
 
             //sleep(0.5);
